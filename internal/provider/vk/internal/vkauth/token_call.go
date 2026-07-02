@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	neturl "net/url"
+	"strings"
 	"time"
 
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/browserprofile"
@@ -43,6 +44,10 @@ func (c *Client) fetchCallToken(
 				data = retryData
 				continue
 			}
+			if termErr := classifyLinkError(errObj); termErr != nil {
+				c.log.Errorf("[STREAM %d] [VK Auth] terminal link error: %v", streamID, termErr)
+				return "", termErr
+			}
 			return "", fmt.Errorf("VK API error: %v", errObj)
 		}
 
@@ -56,6 +61,48 @@ func (c *Client) fetchCallToken(
 		}
 		return token2, nil
 	}
+}
+
+// classifyLinkError распознаёт ТЕРМИНАЛЬНЫЕ ответы VK в join-флоу и возвращает
+// соответствующий sentinel (или nil, если ошибку можно ретраить дальше по
+// client_id). Терминал = ни client_id, ни captcha не помогут, поэтому fast-fail
+// вместо бесконечного цикла "решить captcha -> ошибка -> следующий client_id".
+//
+// Порядок важен: сначала явные коды (терминальные и транзиентные), и только для
+// неизвестного кода - матч по тексту error_msg. Так текстовый матч не может
+// перекрыть транзиентный код (5 auth-failed, 6/9/29 rate/flood, 14 captcha) и
+// убить рабочее подключение из-за подстроки в сообщении.
+func classifyLinkError(errObj map[string]any) error {
+	code := 0
+	if f, ok := errObj["error_code"].(float64); ok {
+		code = int(f)
+	}
+
+	// Явные терминальные коды: 9008 Join link is not valid, 9000 Call not found.
+	if code == 9000 || code == 9008 {
+		return ErrInvalidJoinLink
+	}
+	// Явные транзиентные коды: гасить нельзя, текст ниже к ним не применяем.
+	switch code {
+	case 5, 6, 9, 14, 29:
+		return nil
+	}
+
+	// Код неизвестен/плавает - осторожный матч по тексту.
+	msg := ""
+	if s, ok := errObj["error_msg"].(string); ok {
+		msg = strings.ToLower(s)
+	}
+	switch {
+	case strings.Contains(msg, "not valid") || strings.Contains(msg, "not found"):
+		return ErrInvalidJoinLink
+	// Анонимный вход запрещён. Матчим по "anonym" (не "authoriz" - коллизия с auth-failed).
+	case strings.Contains(msg, "anonym"):
+		return ErrAnonymousBlocked
+	case strings.Contains(msg, "full"):
+		return ErrCallFull
+	}
+	return nil
 }
 
 // solveCaptcha выполняет одну попытку решения captcha и возвращает тело POST
