@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.7.2](https://github.com/samosvalishe/free-turn-proxy/compare/v1.7.1...v1.7.2) (2026-07-07)
+
+
+### Bug Fixes
+
+* **captcha:** linter ([4c0bed1](https://github.com/samosvalishe/free-turn-proxy/commit/4c0bed17976a81301005a4a68d3c660847bf7313))
+
+
+### Refactoring
+
+* **captcha:** вынести inject.js из Go и убрать легаси image-капчу ([ea1cb93](https://github.com/samosvalishe/free-turn-proxy/commit/ea1cb930cc886471ec70567fe789cd807ff13da2))
+
+## [1.7.1](https://github.com/samosvalishe/free-turn-proxy/compare/v1.7.0...v1.7.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* **captcha:** устойчивый разбор debug_info и сигнал дрейфа версии скрипта ([3b33d33](https://github.com/samosvalishe/free-turn-proxy/commit/3b33d33b9e3c2d8d459b479e8d8a94fc562f18cb))
+
 ## [1.7.0](https://github.com/samosvalishe/free-turn-proxy/compare/v1.6.0...v1.7.0) (2026-07-02)
 
 
