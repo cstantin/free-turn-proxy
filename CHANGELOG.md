@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.0](https://github.com/samosvalishe/free-turn-proxy/compare/v1.7.3...v1.8.0) (2026-07-13)
+
+
+### Features
+
+* автопубликация телеграм анонса при релизе ([e678ee1](https://github.com/samosvalishe/free-turn-proxy/commit/e678ee1fd85c64eb42da3ba9ccc580fccbc79749))
+
+
+### Bug Fixes
+
+* **captcha:** persona-модель вместо захвата профиля браузера ([305754c](https://github.com/samosvalishe/free-turn-proxy/commit/305754cd6037fe3b4ec5558b826a89eefc64834b))
+
 ## [1.7.3](https://github.com/samosvalishe/free-turn-proxy/compare/v1.7.2...v1.7.3) (2026-07-12)
 
 
