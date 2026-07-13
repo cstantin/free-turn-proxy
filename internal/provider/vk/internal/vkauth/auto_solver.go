@@ -10,7 +10,7 @@ import (
 	tlsclient "github.com/bogdanfinn/tls-client"
 )
 
-func (c *Client) defaultAutoSolve(
+func (*Client) defaultAutoSolve(
 	ctx context.Context,
 	captchaErr *captcha.Error,
 	streamID int,

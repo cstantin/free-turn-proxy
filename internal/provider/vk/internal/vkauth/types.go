@@ -20,6 +20,9 @@ type TurnCredentials struct {
 	Link        string
 }
 
+// Публичные app_id/secret штатных VK-клиентов (зашиты в сами приложения), не наши приватные креды.
+//
+//nolint:gosec // G101: публичные VK app secrets
 var DefaultCredentials = []VKCredentials{
 	{ClientID: "6287487", ClientSecret: "QbYic1K3lEV5kTGiqlq2"},  // VK_WEB_APP_ID
 	{ClientID: "7879029", ClientSecret: "aR5NKGmm03GYrCiNKsaw"},  // VK_MVK_APP_ID

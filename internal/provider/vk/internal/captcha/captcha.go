@@ -308,12 +308,12 @@ func (s *captchaSession) fetchCaptchaHTML(redirectURI string) (string, error) {
 
 func (s *captchaSession) resolveDebugInfo(scriptURL string) string {
 	if scriptURL != "" {
-		if v, err := s.fetchDebugInfoJS(scriptURL); err == nil {
+		v, err := s.fetchDebugInfoJS(scriptURL)
+		if err == nil {
 			s.logger().Debugf("[Captcha] debug_info from JS len=%d", len(v))
 			return v
-		} else {
-			s.logger().Warnf("[Captcha] debug_info JS fetch failed: %v; using UUID fallback", err)
 		}
+		s.logger().Warnf("[Captcha] debug_info JS fetch failed: %v; using UUID fallback", err)
 	} else {
 		s.logger().Warnf("[Captcha] captcha script URL not in HTML; using UUID fallback")
 	}
