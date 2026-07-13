@@ -1,11 +1,11 @@
 package browserprofile
 
 import (
-	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 
 	fhttp "github.com/bogdanfinn/fhttp"
+	"github.com/bogdanfinn/tls-client/profiles"
 )
 
 func TestKindFromString(t *testing.T) {
@@ -26,29 +26,25 @@ func TestKindFromString(t *testing.T) {
 	}
 }
 
-func TestProfilePathHonorsEnv(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "vk_profile_chrome_42.json")
-	t.Setenv("VK_PROFILE_PATH", path)
-
-	want := Saved{Profile: ForKind(Chrome), DeviceJSON: "{}", BrowserFp: "abc123"}
-	if err := Save(want); err != nil {
-		t.Fatal(err)
+func TestPlatformFromString(t *testing.T) {
+	cases := []struct {
+		in   string
+		want Platform
+	}{
+		{"mobile", Mobile},
+		{"desktop", Desktop},
+		{"", Desktop},
+		{"unknown", Desktop},
 	}
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("profile not written to VK_PROFILE_PATH %s: %v", path, err)
-	}
-
-	got, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.BrowserFp != want.BrowserFp || got.UserAgent != want.UserAgent {
-		t.Fatalf("loaded = %+v, want fp=%s ua=%s", got, want.BrowserFp, want.UserAgent)
+	for _, tc := range cases {
+		if got := PlatformFromString(tc.in); got != tc.want {
+			t.Fatalf("PlatformFromString(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 
-func TestForKindChrome146(t *testing.T) {
-	p := ForKind(Chrome)
+func TestForChromeDesktop146(t *testing.T) {
+	p := For(Chrome, Desktop)
 	if p.UserAgent != "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36" {
 		t.Fatalf("unexpected chrome UA: %q", p.UserAgent)
 	}
@@ -63,35 +59,67 @@ func TestApplyFhttpOmitsClientHintsForFirefoxAndSafari(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ApplyFhttp(req, ForKind(kind))
+		ApplyFhttp(req, For(kind, Desktop))
 		if req.Header.Get("sec-ch-ua") != "" {
 			t.Fatalf("%s sec-ch-ua = %q, want empty", kind, req.Header.Get("sec-ch-ua"))
 		}
-		if req.Header.Get("DNT") != "" {
-			t.Fatalf("%s DNT = %q, want empty", kind, req.Header.Get("DNT"))
-		}
 	}
 }
 
-func TestFamily(t *testing.T) {
+func TestFamilyAndPlatformSet(t *testing.T) {
 	for _, kind := range []Kind{Chrome, Firefox, Safari} {
-		if got := Family(ForKind(kind)); got != kind {
-			t.Fatalf("Family(%s profile) = %q, want %q", kind, got, kind)
+		for _, plat := range []Platform{Desktop, Mobile} {
+			p := For(kind, plat)
+			if Family(p) != kind {
+				t.Fatalf("Family(For(%s,%s)) = %q, want %q", kind, plat, Family(p), kind)
+			}
+			if IsMobile(p) != (plat == Mobile) {
+				t.Fatalf("IsMobile(For(%s,%s)) = %v", kind, plat, IsMobile(p))
+			}
 		}
-	}
-	if got := Family(Profile{UserAgent: "curl/8.0"}); got != "" {
-		t.Fatalf("Family(unknown) = %q, want empty", got)
 	}
 }
 
-func TestIsMobile(t *testing.T) {
-	if IsMobile(ForKind(Chrome)) {
-		t.Fatal("desktop chrome detected as mobile")
+// Персона обязана быть самосогласованной: мобильная платформа -> мобильный UA,
+// мобильный sec-ch-ua (для chromium) и непустой device для captcha.
+func TestPersonaSelfConsistent(t *testing.T) {
+	for _, kind := range []Kind{Chrome, Firefox, Safari} {
+		p := For(kind, Mobile)
+		ua := strings.ToLower(p.UserAgent)
+		if !strings.Contains(ua, "mobile") && !strings.Contains(ua, "iphone") && !strings.Contains(ua, "android") {
+			t.Fatalf("%s mobile UA not mobile: %q", kind, p.UserAgent)
+		}
+		if p.DeviceJSON == "" {
+			t.Fatalf("%s mobile persona has empty DeviceJSON", kind)
+		}
+		if kind == Chrome && p.SecChUaMobile != "?1" {
+			t.Fatalf("chrome mobile sec-ch-ua-mobile = %q, want ?1", p.SecChUaMobile)
+		}
 	}
-	if !IsMobile(Profile{UserAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Mobile Safari/537.36"}) {
-		t.Fatal("android chrome was not detected as mobile")
+	if For(Chrome, Desktop).SecChUaMobile != "?0" {
+		t.Fatalf("chrome desktop sec-ch-ua-mobile != ?0")
 	}
-	if !IsMobile(Profile{UserAgent: ForKind(Chrome).UserAgent, SecChUaMobile: "?1"}) {
-		t.Fatal("sec-ch-ua-mobile ?1 was not detected as mobile")
+}
+
+// TLS-отпечаток - часть персоны: Safari desktop/iOS различаются, Chrome/Firefox
+// одинаковы на всех платформах (один TLS-стек).
+func TestClientProfilePlatformAware(t *testing.T) {
+	cases := []struct {
+		family Kind
+		plat   Platform
+		want   profiles.ClientProfile
+	}{
+		{Safari, Desktop, profiles.Safari_16_0},
+		{Safari, Mobile, profiles.Safari_IOS_17_0},
+		{Chrome, Desktop, profiles.Chrome_146},
+		{Chrome, Mobile, profiles.Chrome_146},
+		{Firefox, Desktop, profiles.Firefox_148},
+		{Firefox, Mobile, profiles.Firefox_148},
+	}
+	for _, tc := range cases {
+		got := For(tc.family, tc.plat).ClientProfile()
+		if got.GetClientHelloStr() != tc.want.GetClientHelloStr() {
+			t.Fatalf("For(%s,%s).ClientProfile() = %s, want %s", tc.family, tc.plat, got.GetClientHelloStr(), tc.want.GetClientHelloStr())
+		}
 	}
 }

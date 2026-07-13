@@ -38,9 +38,9 @@ func TestParseCaptchaPageSPA(t *testing.T) {
 	html := `<html><head><script>
 const powInput = "Pihj7tyAHFxdwm4t";
 const difficulty = 2;
-</script></head><body><div id="spa_root"></div>
-<script>window.vk = { statsMeta: {"hash":"39RzeEGG2Qq7t4YUwG"}, brlefapmjnpg: "1d958dbe-0663-42f2-95e5-0e2780ed2f93", id: 0 };</script>
-</body></html>`
+</script>
+<script src="https://id.vk.ru/static/vkid/1.1.1374/not_robot_captcha.js"></script>
+</head><body><div id="spa_root"></div></body></html>`
 
 	page, err := parseCaptchaPage(html)
 	if err != nil {
@@ -49,8 +49,8 @@ const difficulty = 2;
 	if page.PowInput != "Pihj7tyAHFxdwm4t" || page.PowDifficulty != 2 {
 		t.Fatalf("pow parse = %q/%d", page.PowInput, page.PowDifficulty)
 	}
-	if page.DebugInfo != "1d958dbe-0663-42f2-95e5-0e2780ed2f93" {
-		t.Fatalf("debug_info = %q, want brlefapmjnpg uuid", page.DebugInfo)
+	if page.ScriptURL != "https://id.vk.ru/static/vkid/1.1.1374/not_robot_captcha.js" {
+		t.Fatalf("script url = %q", page.ScriptURL)
 	}
 }
 

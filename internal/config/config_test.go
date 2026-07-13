@@ -134,6 +134,35 @@ func TestParseClient_BrowserInvalid(t *testing.T) {
 	}
 }
 
+func TestParseClient_PlatformDefaultDesktop(t *testing.T) {
+	c, err := ParseClient(validClientArgs(), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.VK.Platform != PlatformDesktop {
+		t.Errorf("VK.Platform = %q, want %q", c.VK.Platform, PlatformDesktop)
+	}
+}
+
+func TestParseClient_PlatformMobile(t *testing.T) {
+	args := append(validClientArgs(), "-platform", "mobile")
+	c, err := ParseClient(args, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.VK.Platform != PlatformMobile {
+		t.Errorf("VK.Platform = %q, want %q", c.VK.Platform, PlatformMobile)
+	}
+}
+
+func TestParseClient_PlatformInvalid(t *testing.T) {
+	args := append(validClientArgs(), "-platform", "tablet")
+	_, err := ParseClient(args, io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "invalid -platform") {
+		t.Errorf("expected platform error, got %v", err)
+	}
+}
+
 func TestParseClient_BondWithoutTCPMode(t *testing.T) {
 	args := append(validClientArgs(), "-bond")
 	_, err := ParseClient(args, io.Discard)

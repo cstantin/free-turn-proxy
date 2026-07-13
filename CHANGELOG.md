@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.0](https://github.com/samosvalishe/free-turn-proxy/compare/v1.7.3...v1.8.0) (2026-07-13)
+
+
+### Features
+
+* автопубликация телеграм анонса при релизе ([e678ee1](https://github.com/samosvalishe/free-turn-proxy/commit/e678ee1fd85c64eb42da3ba9ccc580fccbc79749))
+
+
+### Bug Fixes
+
+* **captcha:** persona-модель вместо захвата профиля браузера ([305754c](https://github.com/samosvalishe/free-turn-proxy/commit/305754cd6037fe3b4ec5558b826a89eefc64834b))
+
 ## [1.7.3](https://github.com/samosvalishe/free-turn-proxy/compare/v1.7.2...v1.7.3) (2026-07-12)
 
 
@@ -261,7 +273,7 @@
 * **docker:** исправить сборку, добавить compose, убрать VLESS_BOND ([dfbfae2](https://github.com/samosvalishe/free-turn-proxy/commit/dfbfae29014b3cd246550589640e871ee424807e))
 * **dtlsdial:** Dial использует хелпер GenerateSelfSignedCert внутри ([21138fe](https://github.com/samosvalishe/free-turn-proxy/commit/21138fef26b61f8ba4b72f8e5389d3b90b7026b2))
 * **dtlsdial:** унифицировать генерацию self-signed сертификата ([ef549dc](https://github.com/samosvalishe/free-turn-proxy/commit/ef549dc2b8405a1e8378d9c81f2ae3871495121f))
-* **install:** переписать установщик сервера — TUI, надёжность, non-interactive ([1b154a2](https://github.com/samosvalishe/free-turn-proxy/commit/1b154a2e84057c07344a4d7308ca7d26f5f127ec))
+* **install:** переписать установщик сервера - TUI, надёжность, non-interactive ([1b154a2](https://github.com/samosvalishe/free-turn-proxy/commit/1b154a2e84057c07344a4d7308ca7d26f5f127ec))
 * **lint:** устранить замечания golangci-lint + переход на dockers_v2 ([dd82332](https://github.com/samosvalishe/free-turn-proxy/commit/dd8233208ccbe60ea17745ddc17df7a8e6c56872))
 * **routes:** починить установку маршрутов в routes.ps1 на Windows ([7b0a907](https://github.com/samosvalishe/free-turn-proxy/commit/7b0a9076380bbcdc2f83d6da63ca3800b5d68412))
 * **server:** ограниченное ожидание второго сигнала; предупреждение при выключенном -wrap ([fb711c1](https://github.com/samosvalishe/free-turn-proxy/commit/fb711c12f5e1f78ee037ceed434b6cdde5a961d8))
@@ -306,7 +318,7 @@
 * **tcpfwd:** заменить busy-loop poll пула на Ready-канал; тихий accept-цикл при shutdown ([2b24471](https://github.com/samosvalishe/free-turn-proxy/commit/2b24471553b7a9acb0c0117d7ce666bac758e97e))
 * **udprelay:** разбить на run/loop/listener ([d82258f](https://github.com/samosvalishe/free-turn-proxy/commit/d82258f844ef65ba06ba05aa7de4130c43f2c56e))
 * **vkauth:** разбить token.go на файлы по шагам ([0e2d42c](https://github.com/samosvalishe/free-turn-proxy/commit/0e2d42c9126505599db25d8c6f82956036c193be))
-* **wire:** переименовать srtpmimicry → rtpopus, заменить bool -obf на -obf-profile ([4bedd00](https://github.com/samosvalishe/free-turn-proxy/commit/4bedd00662bb75a5f2fdd8fc3cee9c8eb6d94e7c))
+* **wire:** переименовать srtpmimicry -> rtpopus, заменить bool -obf на -obf-profile ([4bedd00](https://github.com/samosvalishe/free-turn-proxy/commit/4bedd00662bb75a5f2fdd8fc3cee9c8eb6d94e7c))
 * **wrap:** заменить DTLS-мимикрию на noise-only AEAD ([e2dd09a](https://github.com/samosvalishe/free-turn-proxy/commit/e2dd09a7296f972285850786c6552d66006bf19d))
 * **wrap:** перейти на мимикрию под SRTP в обход content-фильтра VK TURN ([729557d](https://github.com/samosvalishe/free-turn-proxy/commit/729557d00d3f7b16e4d1d876adca23404eff738c))
 * **wrap:** переписать как мимикрию под DTLS 1.2 ApplicationData с AEAD ([39f95a8](https://github.com/samosvalishe/free-turn-proxy/commit/39f95a8e0c2ca3520c530e425aa55a5b586feadb))

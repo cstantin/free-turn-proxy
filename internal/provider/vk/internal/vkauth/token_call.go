@@ -211,7 +211,6 @@ func (c *Client) solveCaptcha(
 	return buildCaptchaRetryData(link, escapedName, token1, captchaErr, successToken), nil
 }
 
-// buildCaptchaRetryData формирует тело POST для следующей попытки captcha.
 func buildCaptchaRetryData(link, escapedName, token1 string, captchaErr *captcha.Error, successToken string) string {
 	if captchaErr.CaptchaSid == "" {
 		return fmt.Sprintf(

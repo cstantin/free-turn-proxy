@@ -1,8 +1,3 @@
-// Package manual реализует ручное решение CAPTCHA - fallback, когда автосолвер
-// (internal/provider/vk/internal/captcha) не справился или пользователь дал -manual-captcha.
-// Поднимает локальный HTTP-сервер 127.0.0.1:8765, проксирующий страницу VK
-// CAPTCHA (с переписыванием абсолютных URL и gzip), открывает её в браузере и
-// ждёт токен/ключ после решения пользователем.
 package manual
 
 import (
@@ -26,18 +21,13 @@ import (
 
 	"github.com/samosvalishe/free-turn-proxy/internal/client/ish"
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
-	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/browserprofile"
 )
 
-// Debug включает подробное логирование request/response проксируемого
-// браузерного трафика. Ставится из main после разбора cfg.
+// Debug включает логирование проксируемого браузерного трафика.
 var Debug bool
 
-// Log - пакетный логгер; по умолчанию no-op. main устанавливает его через
-// SetLogger, чтобы вывод подчинялся -debug.
 var Log logx.Logger = logx.Nop()
 
-// SetLogger ставит логгер пакета.
 func SetLogger(l logx.Logger) { Log = logx.OrNop(l) }
 
 const captchaListenPort = "8765"
@@ -429,35 +419,6 @@ func (t *loggingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			Log.Debugf("[Captcha Proxy] real browser sent %s data: %s", req.URL.Path, string(b))
 			for k, v := range req.Header {
 				Log.Debugf("[Captcha Proxy] header (%s): %s = %s", req.URL.Path, k, strings.Join(v, ", "))
-			}
-		}
-
-		if strings.Contains(req.URL.Path, "captchaNotRobot.componentDone") || strings.Contains(req.URL.Path, "captchaNotRobot.check") {
-			parsedBody, err := neturl.ParseQuery(string(b))
-			if err != nil {
-				Log.Warnf("[Captcha Proxy] failed to parse request body: %v", err)
-			}
-			device := parsedBody.Get("device")
-			browserFp := parsedBody.Get("browser_fp")
-
-			// сохраняем только если есть device. componentDone обычно его содержит.
-			if device != "" && browserFp != "" {
-				sp := browserprofile.Saved{
-					Profile: browserprofile.Profile{
-						UserAgent:       req.Header.Get("User-Agent"),
-						SecChUa:         req.Header.Get("Sec-Ch-Ua"),
-						SecChUaMobile:   req.Header.Get("Sec-Ch-Ua-Mobile"),
-						SecChUaPlatform: req.Header.Get("Sec-Ch-Ua-Platform"),
-						AcceptLanguage:  req.Header.Get("Accept-Language"),
-					},
-					DeviceJSON: device,
-					BrowserFp:  browserFp,
-				}
-				if err := browserprofile.Save(sp); err != nil {
-					Log.Warnf("[Captcha Proxy] failed to save browser profile: %v", err)
-				} else {
-					Log.Infof("[Captcha Proxy] saved real browser profile")
-				}
 			}
 		}
 	}
