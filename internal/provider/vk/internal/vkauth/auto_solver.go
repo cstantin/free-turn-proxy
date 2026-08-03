@@ -10,7 +10,7 @@ import (
 	tlsclient "github.com/bogdanfinn/tls-client"
 )
 
-func (*Client) defaultAutoSolve(
+func (c *Client) defaultAutoSolve(
 	ctx context.Context,
 	captchaErr *captcha.Error,
 	streamID int,
@@ -18,7 +18,7 @@ func (*Client) defaultAutoSolve(
 	profile browserprofile.Profile,
 ) (string, error) {
 	log := captcha.Log
-	log.Infof("[STREAM %d] [Captcha] Solving captcha (family=%s platform=%s)...", streamID, profile.Family, profile.Platform)
+	log.Infof("[STREAM %d] [Captcha] Solving captcha (platform=%s)...", streamID, profile.Platform)
 
 	if captchaErr.SessionToken == "" {
 		return "", fmt.Errorf("no session_token in redirect_uri for auto-solve")
@@ -27,7 +27,9 @@ func (*Client) defaultAutoSolve(
 		return "", fmt.Errorf("no redirect_uri for auto-solve")
 	}
 
-	successToken, err := captcha.Solve(ctx, captchaErr, streamID, client, profile, log)
+	successToken, err := captcha.Solve(ctx, captchaErr, streamID, client, profile, log, func() {
+		c.burnPersona(streamID)
+	})
 	if err != nil {
 		return "", err
 	}
