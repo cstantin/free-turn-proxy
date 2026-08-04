@@ -35,10 +35,10 @@ const (
 	captchaAPIOrigin  = "https://id.vk.ru"
 	captchaDomain     = "vk.ru"
 
-	// captchaDebugInfoFallback - константа виджета из not_robot_captcha.js 1.1.1387.
+	// captchaDebugInfoFallback - константа виджета из not_robot_captcha.js 1.1.1388.
 	// Ротируется вместе с версией бандла; используется, только если бандл не скачался
 	// (UUID тут был бы аномалией - VK всегда шлёт 64-hex).
-	captchaDebugInfoFallback = "b50d237c4ab98510721070cdbafe5dd88691e8883aa2458968040d70f870d91f"
+	captchaDebugInfoFallback = "0dd096fc7f8d86664f9e8789cf34a99977d39090c0477affead7437709c7990f"
 )
 
 var (
@@ -102,8 +102,7 @@ type captchaSession struct {
 	sensors sensorConfig
 	// sensorsStart - момент ответа settings: с него виджет начинает тикать
 	// таймером телеметрии.
-	sensorsStart  time.Time
-	onCompromised func()
+	sensorsStart time.Time
 }
 
 func (s *captchaSession) logger() logx.Logger {
@@ -121,7 +120,6 @@ func Solve(
 	client tlsclient.HttpClient,
 	profile browserprofile.Profile,
 	log logx.Logger,
-	onCompromised func(),
 ) (string, error) {
 	if captchaErr == nil || captchaErr.SessionToken == "" {
 		return "", fmt.Errorf("no session_token in redirect_uri")
@@ -130,15 +128,14 @@ func Solve(
 	l.Infof("[STREAM %d] [Captcha] Solving VK Smart Captcha automatically...", streamID)
 
 	s := &captchaSession{
-		ctx:           ctx,
-		client:        client,
-		profile:       profile,
-		layout:        layoutFor(profile),
-		domain:        captchaDomain,
-		log:           l,
-		browserFP:     profile.VisitorID,
-		sensors:       defaultSensorConfig(),
-		onCompromised: onCompromised,
+		ctx:       ctx,
+		client:    client,
+		profile:   profile,
+		layout:    layoutFor(profile),
+		domain:    captchaDomain,
+		log:       l,
+		browserFP: profile.VisitorID,
+		sensors:   defaultSensorConfig(),
 	}
 
 	for attempt := 1; attempt <= captchaMaxAttempts; attempt++ {
@@ -253,9 +250,6 @@ func (s *captchaSession) escalate(sessionToken string, initContent captchaConten
 	if content.Value == "" {
 		return "", cause
 	}
-	if s.onCompromised != nil {
-		s.onCompromised()
-	}
 	s.logger().Debugf("[Captcha] escalated to slider in-session (content source=%s)", content.Source)
 	// Перерисовка виджета плюс пауза на осознание.
 	if err := s.dwell(500, 1100); err != nil {
@@ -342,10 +336,16 @@ func captchaDomainFromRedirectURI(redirectURI string) string {
 
 func (s *captchaSession) fetchCaptchaHTML(redirectURI string) (string, error) {
 	body, err := s.doRaw(fhttp.MethodGet, redirectURI, nil, map[string]string{
-		"Accept":         "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-		"Sec-Fetch-Dest": "document",
-		"Sec-Fetch-Mode": "navigate",
+		"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+		"Upgrade-Insecure-Requests": "1",
+		"Sec-Fetch-Dest":            "document",
+		"Sec-Fetch-Mode":            "navigate",
+		// Переход по редиректу считается пользовательской активацией.
+		"Sec-Fetch-User": "?1",
 		"Sec-Fetch-Site": "cross-site",
+		// Referer кросс-сайтового перехода режется политикой до origin страницы,
+		// с которой ушли, а ей была страница звонка.
+		"Referer": "https://" + s.domain + "/",
 	})
 	if err != nil {
 		return "", err
@@ -373,9 +373,13 @@ func (s *captchaSession) fetchDebugInfoJS(scriptURL string) (string, error) {
 			return v, nil
 		}
 	}
+	// Бандл тянет тег <script> страницы captcha, а не fetch: другой Dest и no-cors.
 	body, err := s.doRaw(fhttp.MethodGet, scriptURL, nil, map[string]string{
-		"Accept":  "text/javascript,*/*",
-		"Referer": captchaAPIOrigin + "/",
+		"Accept":         "*/*",
+		"Sec-Fetch-Dest": "script",
+		"Sec-Fetch-Mode": "no-cors",
+		"Sec-Fetch-Site": "same-site",
+		"Referer":        captchaAPIOrigin + "/",
 	})
 	if err != nil {
 		return "", err
@@ -451,9 +455,8 @@ func (s *captchaSession) captchaRequest(method string, form [][2]string) (map[st
 func (s *captchaSession) performCaptchaCheck(
 	sessionToken string,
 	answerJSON string,
-	g gesture,
 ) (*captchaCheck, error) {
-	data := buildAnalytics(s.profile, s.sensors, g, time.Since(s.sensorsStart))
+	data := buildAnalytics(s.profile, s.sensors, time.Since(s.sensorsStart))
 	values := make([][2]string, 0, 15)
 	values = append(values,
 		[2]string{"session_token", sessionToken},
@@ -472,8 +475,8 @@ func (s *captchaSession) performCaptchaCheck(
 	if err != nil {
 		return nil, fmt.Errorf("captcha check failed: %w", err)
 	}
-	s.logger().Debugf("[Captcha] check payload answer_bytes=%d pointer_samples=%d conn_samples=%d",
-		len(answerJSON), len(data.cursor)+len(data.taps), len(data.connRtt))
+	s.logger().Debugf("[Captcha] check payload answer_bytes=%d conn_samples=%d accel_samples=%d",
+		len(answerJSON), len(data.connRtt), len(data.accelerometer))
 	check, err := parseCaptchaCheck(resp)
 	if err != nil {
 		return nil, err
@@ -548,7 +551,7 @@ func (s *captchaSession) solveCheckboxCaptcha(sessionToken string) (string, erro
 		return "", err
 	}
 
-	check, err := s.performCaptchaCheck(sessionToken, "{}", g)
+	check, err := s.performCaptchaCheck(sessionToken, "{}")
 	if err != nil {
 		return "", err
 	}
@@ -613,9 +616,11 @@ func (s *captchaSession) doRaw(
 	req.Header.Set("Sec-Fetch-Site", "same-site")
 	req.Header.Set("Sec-Fetch-Mode", "cors")
 	req.Header.Set("Sec-Fetch-Dest", "empty")
-	req.Header.Set("Origin", captchaAPIOrigin)
 	req.Header.Set("Referer", captchaAPIOrigin+"/")
 	if form != nil {
+		// Origin ставится только на CORS-запросы виджета; GET навигации и тега
+		// <script> его не несут.
+		req.Header.Set("Origin", captchaAPIOrigin)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 	for k, v := range extraHeaders {

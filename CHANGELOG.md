@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.1.1](https://github.com/samosvalishe/free-turn-proxy/compare/v2.1.0...v2.1.1) (2026-08-04)
+
+
+### Bug Fixes
+
+* **captcha:** блокировать рекламные хосты в ручном режиме ([4174f29](https://github.com/samosvalishe/free-turn-proxy/commit/4174f29c63c0d5c7ffa645de9b0717a60d6849cb))
+* **captcha:** линтер в трассировке запросов ([59a8c84](https://github.com/samosvalishe/free-turn-proxy/commit/59a8c84157750be7b6219d57891c120eb2393230))
+* **captcha:** не жечь персону на эскалации checkbox -&gt; slider ([ee13563](https://github.com/samosvalishe/free-turn-proxy/commit/ee1356308bb2a1b67b48c11d841a330d61a1b0cd))
+* **captcha:** обновить пин debug_info под виджет 1.1.1388 ([ea477a3](https://github.com/samosvalishe/free-turn-proxy/commit/ea477a3bc21d7fd0b8dedfe6ae201b6950fda301))
+* **captcha:** привести запросы к поведению живого виджета 1.1.1388 ([4fa7810](https://github.com/samosvalishe/free-turn-proxy/commit/4fa7810afa35bd086f30b66e3e0660df702ba3fe))
+* **captcha:** разносить попытки слайдера по дорожке ([8eb3873](https://github.com/samosvalishe/free-turn-proxy/commit/8eb3873d27ffb679eddc2a2f230b5a58f9d6708a))
+* **captcha:** убрать reverse-скор из ранжирования slider-кандидатов ([d9a0554](https://github.com/samosvalishe/free-turn-proxy/commit/d9a05544891e8f7354758bfbc06b0e5e9ea7eba7))
+
+
+### Refactoring
+
+* **captcha:** убрать трассировку запросов ([1ca3451](https://github.com/samosvalishe/free-turn-proxy/commit/1ca3451b7690179e4d00f318f471251062a9ee65))
+
 ## [2.1.0](https://github.com/samosvalishe/free-turn-proxy/compare/v2.0.2...v2.1.0) (2026-08-01)
 
 

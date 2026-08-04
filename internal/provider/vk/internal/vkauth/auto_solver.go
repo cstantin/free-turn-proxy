@@ -10,7 +10,7 @@ import (
 	tlsclient "github.com/bogdanfinn/tls-client"
 )
 
-func (c *Client) defaultAutoSolve(
+func (*Client) defaultAutoSolve(
 	ctx context.Context,
 	captchaErr *captcha.Error,
 	streamID int,
@@ -27,9 +27,7 @@ func (c *Client) defaultAutoSolve(
 		return "", fmt.Errorf("no redirect_uri for auto-solve")
 	}
 
-	successToken, err := captcha.Solve(ctx, captchaErr, streamID, client, profile, log, func() {
-		c.burnPersona(streamID)
-	})
+	successToken, err := captcha.Solve(ctx, captchaErr, streamID, client, profile, log)
 	if err != nil {
 		return "", err
 	}
