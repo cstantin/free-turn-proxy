@@ -1,6 +1,6 @@
 module github.com/samosvalishe/free-turn-proxy
 
-go 1.26.5
+go 1.26.6
 
 require (
 	github.com/amnezia-vpn/amneziawg-go v0.2.19
