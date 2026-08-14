@@ -47,30 +47,13 @@ type Profile struct {
 	SecChUaMobile   string
 	SecChUaPlatform string
 	AcceptLanguage  string
-	// Viewport - innerWidth/innerHeight персоны; из него же считаются координаты
-	// указателя в телеметрии captcha.
-	Viewport Size
-	// DeviceJSON - navigator/screen fingerprint для captcha componentDone,
-	// сериализованный из того же device, что дал Viewport.
+	// DeviceJSON - navigator/screen fingerprint для captcha componentDone.
 	DeviceJSON string
 	// VisitorID - идентификатор FingerprintJS этой личности.
 	VisitorID string
 }
 
-type Size struct {
-	W int
-	H int
-}
-
 func (p Profile) IsMobile() bool { return p.Platform == Mobile }
-
-// Touch - ввод пальцем вместо мыши: определяет, какой массив телеметрии captcha
-// (taps против cursor) вообще может быть непустым.
-func (p Profile) Touch() bool { return p.IsMobile() }
-
-// Accelerometer - даст ли window.Accelerometer (Generic Sensor API) реальные
-// показания: на десктопе сенсора нет.
-func (p Profile) Accelerometer() bool { return p.IsMobile() }
 
 // device - то, что виджет captcha собирает из navigator/screen. Порядок полей
 // повторяет порядок ключей в объекте виджета, отсутствующие в браузере поля
@@ -147,8 +130,8 @@ var mobileSpecs = []spec{
 type Identity struct {
 	// Seed - стабильная строка установки: личность переживает перезапуск.
 	Seed string
-	// Gen растёт при сжигании персоны: отвергнутый captcha отпечаток не
-	// переиспользуется, но и не меняется в середине сессии.
+	// Gen растёт при сжигании персоны: отвергнутый отпечаток не переиспользуется
+	// до конца процесса, но между запусками возвращается.
 	Gen int
 }
 
@@ -171,7 +154,7 @@ func For(p Platform, id Identity) Profile {
 		SecChUa:         chromeSecChUa,
 		SecChUaMobile:   "?0",
 		SecChUaPlatform: s.chPlatform,
-		AcceptLanguage:  "ru-RU,ru;q=0.9",
+		AcceptLanguage:  "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7",
 		UserAgent:       s.userAgent,
 	}
 	if p == Mobile {
@@ -190,20 +173,16 @@ func newDevice(screenW, screenH, availH, innerW, innerH int, dpr float64, cores,
 		ScreenWidth: screenW, ScreenHeight: screenH,
 		ScreenAvailWidth: screenW, ScreenAvailHeight: availH,
 		InnerWidth: innerW, InnerHeight: innerH,
-		DevicePixelRatio:    dpr,
-		Language:            "ru-RU",
-		Languages:           []string{"ru-RU"},
-		HardwareConcurrency: cores,
-		DeviceMemory:        &memory,
-		// Сеть репортится как 4g и на Wi-Fi: NetworkInformation огрубляет тип до
-		// класса скорости.
+		DevicePixelRatio:        dpr,
+		Language:                "ru-RU",
+		Languages:               []string{"ru-RU", "en-US"},
+		HardwareConcurrency:     cores,
+		DeviceMemory:            &memory,
 		ConnectionEffectiveType: "4g",
-		NotificationsPermission: "prompt",
+		NotificationsPermission: "denied",
 	}
 }
 
-// visitorID - слот FingerprintJS: у живого посетителя стабилен между визитами,
-// поэтому выводится из личности целиком, а не генерится на попытку.
 func visitorID(id Identity, p Profile) string {
 	sum := sha256.Sum256([]byte(id.String() + "|" + p.UserAgent + "|" + p.DeviceJSON))
 	return hex.EncodeToString(sum[:16])
@@ -214,7 +193,6 @@ func withDevice(p Profile, d device) Profile {
 	if err != nil {
 		return p
 	}
-	p.Viewport = Size{W: d.InnerWidth, H: d.InnerHeight}
 	p.DeviceJSON = string(data)
 	return p
 }

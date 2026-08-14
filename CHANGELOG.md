@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.1.2](https://github.com/samosvalishe/free-turn-proxy/compare/v2.1.1...v2.1.2) (2026-08-14)
+
+
+### Bug Fixes
+
+* **captcha:** fmt ([95803f4](https://github.com/samosvalishe/free-turn-proxy/commit/95803f481a683056651768225bc0c64e177ad468))
+* **captcha:** выровнять авторешение по живому браузеру ([235ab1a](https://github.com/samosvalishe/free-turn-proxy/commit/235ab1a6463a9758223d38f0eacc4c630d80a4a5))
+* **deps:** обновить Go 1.26.5 -&gt; 1.26.6 ([5bc164f](https://github.com/samosvalishe/free-turn-proxy/commit/5bc164f78da2b54a2013c3e046f7d02799ceaf20))
+
 ## [2.1.1](https://github.com/samosvalishe/free-turn-proxy/compare/v2.1.0...v2.1.1) (2026-08-04)
 
 

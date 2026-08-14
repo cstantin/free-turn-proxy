@@ -2,6 +2,10 @@ package captcha
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -33,6 +37,7 @@ func TestCaptchaInitSettingContentRefLegacySettings(t *testing.T) {
 
 func TestParseCaptchaPageSPA(t *testing.T) {
 	html := `<html><head><script>
+window.captchaPowResult = 'v2.' + btoa(JSON.stringify({ hash: hash, nonce: nonce }));
 const powInput = "Pihj7tyAHFxdwm4t";
 const difficulty = 2;
 </script>
@@ -46,6 +51,9 @@ const difficulty = 2;
 	if page.PowInput != "Pihj7tyAHFxdwm4t" || page.PowDifficulty != 2 {
 		t.Fatalf("pow parse = %q/%d", page.PowInput, page.PowDifficulty)
 	}
+	if page.PowPrefix != "v2." {
+		t.Fatalf("pow prefix = %q, want v2.", page.PowPrefix)
+	}
 	if page.ScriptURL != "https://static.vk.ru/vkid/1.1.1384/not_robot_captcha.js" {
 		t.Fatalf("script url = %q", page.ScriptURL)
 	}
@@ -57,16 +65,52 @@ func TestParseCaptchaPageMissingPoW(t *testing.T) {
 	}
 }
 
+// Формат конверта задаёт страница: незнакомая обёртка должна ронять авторешение,
+// а не уезжать в check заведомо неверным hash.
+func TestParseCaptchaPageMissingPowEnvelope(t *testing.T) {
+	html := `<html><head><script>
+const powInput = "Pihj7tyAHFxdwm4t";
+const difficulty = 2;
+</script></head><body></body></html>`
+	if _, err := parseCaptchaPage(html); err == nil {
+		t.Fatal("expected error when captchaPowResult envelope absent")
+	}
+}
+
 func TestSolveCaptchaPoWRawHex(t *testing.T) {
-	got := solveCaptchaPoW(context.Background(), "input", 1)
+	got, nonce := solveCaptchaPoW(context.Background(), "input", 1)
 	if len(got) != 64 {
 		t.Fatalf("pow = %q, want 64-hex", got)
 	}
 	if !strings.HasPrefix(got, "0") {
 		t.Fatalf("pow = %q, want leading zero for difficulty 1", got)
 	}
-	if again := solveCaptchaPoW(context.Background(), "input", 1); again != got {
-		t.Fatalf("pow not deterministic: %q vs %q", got, again)
+	again, againNonce := solveCaptchaPoW(context.Background(), "input", 1)
+	if again != got || againNonce != nonce {
+		t.Fatalf("pow not deterministic: %q/%d vs %q/%d", got, nonce, again, againNonce)
+	}
+	sum := sha256.Sum256([]byte("input" + strconv.Itoa(nonce)))
+	if hex.EncodeToString(sum[:]) != got {
+		t.Fatalf("pow hash does not match sha256(input+nonce)")
+	}
+}
+
+func TestEncodePowResult(t *testing.T) {
+	got, err := encodePowResult("v2.", powResult{Hash: "00ab", Nonce: 7, DurationMs: 42})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, ok := strings.CutPrefix(got, "v2.")
+	if !ok {
+		t.Fatalf("pow result = %q, want v2. prefix", got)
+	}
+	raw, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Порядок ключей копирует JSON.stringify страницы.
+	if string(raw) != `{"hash":"00ab","nonce":7,"duration_ms":42}` {
+		t.Fatalf("pow payload = %s", raw)
 	}
 }
 
@@ -181,5 +225,84 @@ func TestPickSliderAttempts(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// VK раздаёт страницу то с id.vk.ru, то с api.vk.ru: Origin от одного хоста при
+// странице на другом браузер выдать не может.
+func TestAPIRequestHeadersFollowPageOrigin(t *testing.T) {
+	const pageQuery = "/not_robot_captcha?domain=vk.com&session_token=x&variant=popup"
+
+	cases := []struct {
+		name     string
+		page     string
+		apiHost  string
+		wantSite string
+		wantRef  string
+		wantOrig string
+	}{
+		{
+			name:     "cross-origin page",
+			page:     "https://id.vk.ru" + pageQuery,
+			apiHost:  "api.vk.ru",
+			wantSite: "same-site",
+			wantRef:  "https://id.vk.ru/",
+			wantOrig: "https://id.vk.ru",
+		},
+		{
+			name:     "same-origin page keeps full url in referer",
+			page:     "https://api.vk.ru" + pageQuery,
+			apiHost:  "api.vk.ru",
+			wantSite: "same-origin",
+			wantRef:  "https://api.vk.ru" + pageQuery,
+			wantOrig: "https://api.vk.ru",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &captchaSession{apiHost: tc.apiHost}
+			s.setPageURL(tc.page)
+			got := s.apiRequestHeaders()
+			if got["Sec-Fetch-Site"] != tc.wantSite {
+				t.Fatalf("Sec-Fetch-Site = %q, want %q", got["Sec-Fetch-Site"], tc.wantSite)
+			}
+			if got["Referer"] != tc.wantRef {
+				t.Fatalf("Referer = %q, want %q", got["Referer"], tc.wantRef)
+			}
+			if got["Origin"] != tc.wantOrig {
+				t.Fatalf("Origin = %q, want %q", got["Origin"], tc.wantOrig)
+			}
+		})
+	}
+}
+
+// Пока challenge есть в window.init, виджет не ходит в initSession - и мы тоже.
+func TestParseCaptchaInitGlobal(t *testing.T) {
+	html := `<script>window.init = {"hosts":{"api":"api.vk.ru"},` +
+		`"data":{"show_captcha_type":"slider","captcha_settings":[{"type":"slider","settings_key":"a2V5"}]},` +
+		`"tail":{"brace":"}"}};</script>`
+	got := parseCaptchaInitGlobal(html)
+	if !got.Found || got.APIHost != "api.vk.ru" || got.ShowType != "slider" {
+		t.Fatalf("init = %+v", got)
+	}
+	if got.Content.Value != "a2V5" || got.Content.Source != "settings_key" {
+		t.Fatalf("content = %+v", got.Content)
+	}
+}
+
+// Без window.init виджет запрашивает initSession сам - и Found обязан быть false.
+func TestParseCaptchaInitGlobalAbsent(t *testing.T) {
+	if got := parseCaptchaInitGlobal(`<script>var x = 1;</script>`); got.Found || got.APIHost != "" {
+		t.Fatalf("init = %+v, want empty", got)
+	}
+}
+
+// Битый redirect_uri не должен оставлять Origin пустым.
+func TestSetPageURLFallsBackToWidgetOrigin(t *testing.T) {
+	s := &captchaSession{apiHost: "api.vk.ru"}
+	s.setPageURL("not-a-url")
+	if s.pageOrigin != captchaAPIOrigin || s.pageURL != captchaAPIOrigin+"/" {
+		t.Fatalf("page = %q / %q", s.pageOrigin, s.pageURL)
 	}
 }

@@ -141,31 +141,8 @@ func TestPlatformSet(t *testing.T) {
 	}
 }
 
-// Показания акселерометра даёт только мобильная персона: на десктопе сенсора нет.
-func TestAccelerometerOnlyOnMobile(t *testing.T) {
-	if For(Desktop, Identity{Seed: testSeed}).Accelerometer() {
-		t.Fatal("desktop persona claims accelerometer")
-	}
-	if !For(Mobile, Identity{Seed: testSeed}).Accelerometer() {
-		t.Fatal("mobile persona lost accelerometer")
-	}
-}
-
-// Viewport и device считаются из одного источника: координаты телеметрии обязаны
-// лежать внутри окна, которое персона заявила в componentDone.
-func TestViewportMatchesDeviceJSON(t *testing.T) {
-	for _, plat := range []Platform{Desktop, Mobile} {
-		for _, p := range personas(t, plat) {
-			dev := deviceOf(t, p)
-			if p.Viewport.W != dev.InnerWidth || p.Viewport.H != dev.InnerHeight {
-				t.Fatalf("%s viewport %+v != device %dx%d", plat, p.Viewport, dev.InnerWidth, dev.InnerHeight)
-			}
-		}
-	}
-}
-
 // Окно не бывает больше экрана, а рабочая область - больше самого экрана.
-func TestViewportFitsScreen(t *testing.T) {
+func TestWindowFitsScreen(t *testing.T) {
 	for _, plat := range []Platform{Desktop, Mobile} {
 		for _, p := range personas(t, plat) {
 			dev := deviceOf(t, p)
