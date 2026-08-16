@@ -42,8 +42,6 @@ type turnJSON struct {
 }
 
 type proxyJSON struct {
-	Mode   string `json:"mode"`
-	Bond   bool   `json:"bond"`
 	Listen string `json:"listen"`
 }
 
@@ -131,11 +129,7 @@ func defaultClientJSON() ClientJSON {
 			Host:      r.Turn,
 			Port:      r.Port,
 		},
-		Proxy: proxyJSON{
-			Mode:   r.Mode,
-			Bond:   r.Bond,
-			Listen: r.Listen,
-		},
+		Proxy: proxyJSON{Listen: r.Listen},
 		VK: vkJSON{
 			StreamsPerCred: r.StreamsPerCred,
 			ManualCaptcha:  r.ManualCaptcha,
@@ -169,8 +163,6 @@ func (j ClientJSON) toRaw() raw {
 		N:              j.TURN.N,
 		StreamsPerCred: j.VK.StreamsPerCred,
 		Transport:      j.TURN.Transport,
-		Mode:           j.Proxy.Mode,
-		Bond:           j.Proxy.Bond,
 
 		ObfProfile: j.Obf.Profile,
 		ObfKey:     j.Obf.Key,

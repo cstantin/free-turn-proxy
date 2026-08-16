@@ -15,7 +15,6 @@ func TestClientArgsRoundTrip(t *testing.T) {
 		args []string
 	}{
 		{"minimal", validClientArgs()},
-		{"tcp bond", append(validClientArgs(), "-mode", "tcp", "-bond")},
 		{"udp transport", append(validClientArgs(), "-transport", "udp")},
 		{"obf", append(validClientArgs(), "-obf-profile", "rtpopus3", "-obf-key", testObfKey)},
 		{"obf timing", append(validClientArgs(), "-obf-profile", "rtpopus", "-obf-key", testObfKey, "-obf-timing", "20ms")},

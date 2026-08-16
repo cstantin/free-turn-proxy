@@ -1,5 +1,4 @@
-// Package common содержит общие вспомогательные функции для udprelay и tcpfwd.
-package common
+package udprelay
 
 import (
 	"context"
@@ -8,7 +7,6 @@ import (
 	"net"
 
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/turndial"
-	"github.com/samosvalishe/free-turn-proxy/internal/wire"
 )
 
 // GetCredsFunc разрешает TURN-реквизиты для streamID.
@@ -42,9 +40,4 @@ func DialTURN(ctx context.Context, host, port string, udp bool, peer *net.UDPAdd
 		}
 	}
 	return nil, fmt.Errorf("all TURN candidates failed: %w", errors.Join(errs...))
-}
-
-// NewClientObf возвращает клиентский wire.Codec для профиля obf.
-func NewClientObf(profile string, key []byte) (wire.Codec, error) {
-	return wire.NewClientCodec(profile, key)
 }

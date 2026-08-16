@@ -25,14 +25,12 @@ Payload - JSON-объект, закодированный `base64url` (без pa
 | `provider` | `-provider` | источник TURN-creds (например `vk`). |
 | `peer` | `-peer` | адрес сервера на VPS (`ip:port`). |
 | `transport` | `-transport` | транспорт до TURN-реле: `tcp` \| `udp`. |
-| `mode` | `-mode` | режим туннеля: `udp` \| `tcp`. |
-| `bond` | `-bond` | bonding TCP (`true`), только с `mode=tcp`. |
 | `obf` | `-obf-profile` | профиль обфускации (`rtpopus` \| `rtpopus2`); `none` опускается. |
 | `key` | `-obf-key` | ключ обфускации (hex), только при заданном `obf`. |
 | `n` | `-n` | число TURN-потоков. |
 | `spc` | `-streams-per-cred` | потоков на один кеш VK-учёток. |
 | `cid` | `-client-id` | Client ID гостя; owner добавляет его в allowlist (`clients.json`). |
-| `listen` | `-listen` | локальный `ip:port` для WireGuard/Xray. |
+| `listen` | `-listen` | локальный `ip:port` для WireGuard. |
 | `dns` | `-dns-mode` | резолвер клиента: `plain` \| `doh` \| `auto`. |
 | `dnss` | `-dns-servers` | свои DNS через запятую. |
 | `mcap` | `-manual-captcha` | ручная VK captcha (`true`). |
@@ -47,7 +45,7 @@ Payload - JSON-объект, закодированный `base64url` (без pa
 ### Пример (декодированный payload)
 
 ```json
-{"v":1,"provider":"vk","peer":"1.2.3.4:56000","transport":"tcp","mode":"udp",
+{"v":1,"provider":"vk","peer":"1.2.3.4:56000","transport":"tcp",
  "obf":"rtpopus","key":"d823fa...","n":10,"cid":"a1b2c3...","name":"RU-Server"}
 ```
 
@@ -57,4 +55,4 @@ Payload - JSON-объект, закодированный `base64url` (без pa
 ./client "freeturn://eyJ2IjoxLCJwcm92aWRlciI6InZrIiwicGVlciI6..." -link "https://vk.ru/call/join/..."
 ```
 
-Параметры из URI переопределяют базовые флаги (`-peer`, `-mode`, `-obf-key`, `-n` ...).
+Параметры из URI переопределяют базовые флаги (`-peer`, `-transport`, `-obf-key`, `-n` ...).

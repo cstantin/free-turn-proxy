@@ -6,7 +6,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcptun"
 	"github.com/samosvalishe/free-turn-proxy/internal/uri"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire/rtpopus"
 )
@@ -40,15 +39,13 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	}
 	fs.StringVar(&r.Turn, "turn", r.Turn, "IP TURN-сервера; override creds провайдера")
 	fs.StringVar(&r.Port, "port", r.Port, "порт TURN-сервера; override creds провайдера")
-	fs.StringVar(&r.Listen, "listen", r.Listen, "локальный ip:port для WireGuard/Xray клиента")
+	fs.StringVar(&r.Listen, "listen", r.Listen, "локальный ip:port для WireGuard-клиента")
 	fs.StringVar(&r.Provider, "provider", r.Provider, "источник TURN-creds: vk")
 	fs.StringVar(&r.Link, "link", r.Link, "(устарел) одна ссылка VK Calls, используйте -links")
 	fs.StringVar(&r.Links, "links", r.Links, "ссылки VK Calls через запятую: https://vk.ru/call/join/...,https://vk.ru/call/join/...")
 	fs.StringVar(&r.Peer, "peer", r.Peer, "адрес сервера на VPS, host:port; обязательно")
 	fs.IntVar(&r.N, "n", r.N, "число параллельных TURN-потоков")
 	fs.StringVar(&r.Transport, "transport", r.Transport, "транспорт до TURN-реле: tcp | udp")
-	fs.StringVar(&r.Mode, "mode", r.Mode, "режим туннеля: udp (WireGuard) | tcp (Xray/sing-box)")
-	fs.BoolVar(&r.Bond, "bond", r.Bond, "страйпинг TCP по smux-сессиям; только с -mode tcp")
 	fs.StringVar(&r.ObfProfile, "obf-profile", r.ObfProfile, "wire-профиль обфускации: none | rtpopus | rtpopus2 | rtpopus3; должен совпадать с сервером")
 	fs.StringVar(&r.ObfKey, "obf-key", r.ObfKey, "ключ для -obf-profile != none: 32 байта hex (64 символа)")
 	fs.BoolVar(&r.GenObfKey, "gen-obf-key", r.GenObfKey, "напечатать новый -obf-key и выйти")
@@ -97,8 +94,7 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 		fs.SetOutput(errOut)
 	}
 	listen := fs.String("listen", def.Proxy.Listen, "локальный адрес прослушивания ip:port")
-	connect := fs.String("connect", "", "локальный бэкенд host:port; обязательно: WG 127.0.0.1:51820 | Xray 127.0.0.1:443")
-	mode := fs.String("mode", DefaultMode, "режим туннеля: udp (WireGuard) | tcp (Xray/sing-box; bond авто)")
+	connect := fs.String("connect", "", "локальный бэкенд host:port; обязательно: WG 127.0.0.1:51820")
 	obfProfile := fs.String("obf-profile", string(def.Obf.Profile), "wire-профиль обфускации: none | rtpopus | rtpopus2 | rtpopus3; должен совпадать с клиентом")
 	obfKey := fs.String("obf-key", "", "ключ для -obf-profile != none: 32 байта hex (64 символа)")
 	genObfKey := fs.Bool("gen-obf-key", false, "напечатать новый -obf-key и выйти")
@@ -110,12 +106,6 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 		return nil, err
 	}
 
-	switch *mode {
-	case ModeUDP, ModeTCP:
-	default:
-		return nil, fmt.Errorf("invalid -mode value %q: must be %s | %s", *mode, ModeUDP, ModeTCP)
-	}
-
 	s := &Server{
 		Obf: ObfOpts{
 			Profile: ObfProfile(*obfProfile),
@@ -123,15 +113,10 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 			Timing:  *obfTiming,
 		},
 		Proxy: ProxyOpts{
-			Mode:    serverProxyMode(*mode),
 			Listen:  *listen,
 			Connect: *connect,
 		},
-		Log: LogOpts{Debug: *debug},
-		KCP: KCPOpts{
-			Profile: kcptun.DefaultProfile(),
-			FEC:     kcptun.FEC{},
-		},
+		Log:         LogOpts{Debug: *debug},
 		ClientsFile: *clientsFile,
 	}
 

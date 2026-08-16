@@ -146,24 +146,6 @@ func TestStartTunnelRejectsBadFD(t *testing.T) {
 	}
 }
 
-func TestStartTunnelRejectsTCPMode(t *testing.T) {
-	t.Cleanup(Stop)
-	payload := map[string]any{
-		"peer":     "1.2.3.4:5000",
-		"clientId": "deadbeef",
-		"vk":       map[string]any{"links": []string{"CODE"}},
-		"proxy":    map[string]any{"mode": "tcp"},
-		"tunnel":   map[string]any{"mode": "wg", "config": wgConf()},
-	}
-	b, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := StartTunnel(string(b), 3); err == nil || !strings.Contains(err.Error(), "udp") {
-		t.Fatalf("StartTunnel() error = %v, want udp-mode requirement", err)
-	}
-}
-
 func TestValidateConfigRejectsTunnelWithoutConfig(t *testing.T) {
 	msg := ValidateConfig(tunnelConfigJSON(t, "wg", ""))
 	if !strings.Contains(msg, "tunnel config") {

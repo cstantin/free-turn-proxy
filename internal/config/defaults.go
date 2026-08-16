@@ -1,16 +1,10 @@
 package config
 
-import (
-	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcptun"
-	"github.com/samosvalishe/free-turn-proxy/internal/tunnel"
-)
+import "github.com/samosvalishe/free-turn-proxy/internal/tunnel"
 
 const (
 	TransportTCP = "tcp"
 	TransportUDP = "udp"
-
-	ModeUDP = "udp"
-	ModeTCP = "tcp"
 )
 
 const (
@@ -24,7 +18,6 @@ const (
 	DefaultStreams        = 10
 	DefaultStreamsPerCred = 10
 	DefaultTransport      = TransportTCP
-	DefaultMode           = ModeUDP
 	DefaultDNSMode        = DNSModeAuto
 	DefaultProvider       = ProviderVK
 	DefaultPlatform       = PlatformDesktop
@@ -40,7 +33,6 @@ func defaultRaw() raw {
 		N:              DefaultStreams,
 		StreamsPerCred: DefaultStreamsPerCred,
 		Transport:      DefaultTransport,
-		Mode:           DefaultMode,
 		ObfProfile:     string(DefaultObfProfile),
 		Platform:       string(DefaultPlatform),
 		DNSMode:        DefaultDNSMode,
@@ -63,7 +55,6 @@ func Defaults() Client {
 func ServerDefaults() Server {
 	return Server{
 		Obf:   ObfOpts{Profile: DefaultObfProfile},
-		Proxy: ProxyOpts{Mode: ProxyModeUDP, Listen: DefaultServerListen},
-		KCP:   KCPOpts{Profile: kcptun.DefaultProfile()},
+		Proxy: ProxyOpts{Listen: DefaultServerListen},
 	}
 }

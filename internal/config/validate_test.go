@@ -33,11 +33,6 @@ func TestValidateRejects(t *testing.T) {
 		{"dns mode", func(c *Client) { c.DNS.Mode = "bogus" }, "invalid -dns-mode"},
 		{"obf profile", func(c *Client) { c.Obf.Profile = "bogus" }, "invalid -obf-profile"},
 		{"timing without obf", func(c *Client) { c.Obf.Timing = time.Second }, "-obf-timing"},
-		{"timing with tcp", func(c *Client) {
-			c.Obf.Profile = ObfProfileRTPOpus3
-			c.Obf.Timing = time.Second
-			c.Proxy.Mode = ProxyModeTCPFwd
-		}, "-obf-timing"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

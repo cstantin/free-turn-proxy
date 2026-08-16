@@ -9,7 +9,7 @@ import (
 
 func TestParse(t *testing.T) {
 	link1 := (&uri.Config{
-		Version: 1, Provider: "vk", Peer: "1.1.1.1:56000", Mode: "tcp",
+		Version: 1, Provider: "vk", Peer: "1.1.1.1:56000",
 	}).String()
 	link2 := (&uri.Config{
 		Version: 1, Provider: "vk", Peer: "2.2.2.2:56000",
@@ -50,7 +50,7 @@ func TestParse(t *testing.T) {
 	if n1.IP != "1.1.1.1" {
 		t.Errorf("Node[0].IP = %v, want 1.1.1.1", n1.IP)
 	}
-	if n1.URI.Provider != "vk" || n1.URI.Mode != "tcp" {
+	if n1.URI.Provider != "vk" {
 		t.Errorf("Node[0].URI = %+v", n1.URI)
 	}
 

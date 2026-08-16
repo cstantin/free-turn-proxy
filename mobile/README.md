@@ -49,7 +49,7 @@ func Version() string
   "clientId": "0123456789abcdef0123456789abcdef",
   "provider": "vk",
   "turn":  {"n": 12, "transport": "tcp", "host": "", "port": ""},
-  "proxy": {"mode": "udp", "bond": false, "listen": "127.0.0.1:9000"},
+  "proxy": {"listen": "127.0.0.1:9000"},
   "vk":    {"links": ["https://vk.ru/call/join/..."], "streamsPerCred": 12,
             "manualCaptcha": false, "platform": "mobile"},
   "obf":   {"profile": "rtpopus3", "key": "<64 hex>", "timingMs": 0},
@@ -78,7 +78,7 @@ p.dns.split(",").filter { it.isNotEmpty() }.forEach(builder::addDnsServer)
 p.allowedIPs.split(",").forEach { builder.addRoute(it.substringBefore("/"), it.substringAfter("/").toInt()) }
 ```
 
-Для `wg`/`awg` требуется `proxy.mode = "udp"` и запуск через `StartTunnel`:
+Для `wg`/`awg` нужен запуск через `StartTunnel`:
 ```kotlin
 pfd = builder.establish()!!                     // хранится в сервисе, живёт дольше сессии
 Mobile.startTunnel(configJson, pfd.dup().detachFd().toLong())

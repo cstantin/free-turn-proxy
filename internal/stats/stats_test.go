@@ -33,27 +33,6 @@ func TestFormatBitsPerSecond(t *testing.T) {
 	}
 }
 
-func TestFormatByteCount(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		bytes uint64
-		want  string
-	}{
-		{0, "0 B"},
-		{1023, "1023 B"},
-		{1024, "1.0 KiB"},
-		{1024 * 1024, "1.00 MiB"},
-		{2 * 1024 * 1024, "2.00 MiB"},
-	}
-	for _, c := range cases {
-		got := FormatByteCount(c.bytes)
-		if got != c.want {
-			t.Errorf("FormatByteCount(%d) = %q, want %q", c.bytes, got, c.want)
-		}
-	}
-}
-
 func TestStatsDisabledNoOp(t *testing.T) {
 	t.Parallel()
 

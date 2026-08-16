@@ -15,8 +15,6 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk"
-	"github.com/samosvalishe/free-turn-proxy/internal/proxy/bondclient"
-	"github.com/samosvalishe/free-turn-proxy/internal/proxy/tcpfwd"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/udprelay"
 	"github.com/samosvalishe/free-turn-proxy/internal/routemgr"
 	"github.com/samosvalishe/free-turn-proxy/internal/stats"
@@ -45,7 +43,6 @@ const (
 	defaultStatusInterval       = 500 * time.Millisecond
 	defaultRateInterval         = time.Second
 	defaultUDPHandshakeTimeout  = 20 * time.Second
-	defaultTCPHandshakeTimeout  = 30 * time.Second
 	defaultHandshakeConcurrency = 3
 
 	wakeTick      = 5 * time.Second
@@ -58,7 +55,6 @@ type Options struct {
 	StatusInterval       time.Duration
 	RateInterval         time.Duration
 	UDPHandshakeTimeout  time.Duration
-	TCPHandshakeTimeout  time.Duration
 	HandshakeConcurrency int
 
 	Traffic bool
@@ -74,9 +70,6 @@ func (o Options) withDefaults() Options {
 	if o.UDPHandshakeTimeout <= 0 {
 		o.UDPHandshakeTimeout = defaultUDPHandshakeTimeout
 	}
-	if o.TCPHandshakeTimeout <= 0 {
-		o.TCPHandshakeTimeout = defaultTCPHandshakeTimeout
-	}
 	if o.HandshakeConcurrency <= 0 {
 		o.HandshakeConcurrency = defaultHandshakeConcurrency
 	}
@@ -88,7 +81,7 @@ type Deps struct {
 	Observer      Observer
 	Solver        vk.ManualSolverFunc
 	CaptchaActive func() bool
-	// LocalPipe подменяет локальный UDP-сокет прямым каналом в памяти (только udp).
+	// LocalPipe подменяет локальный UDP-сокет прямым каналом в памяти.
 	LocalPipe net.PacketConn
 	Options   Options
 }
@@ -322,34 +315,6 @@ func (s *Session) relay(ctx context.Context, prov provider.Provider, peer *net.U
 			routeCallback = rm.Callback()
 			log.Infof("route manager: gateway=%s", rm.Gateway())
 		}
-	}
-
-	if s.cfg.Proxy.Mode != config.ProxyModeUDP {
-		dialer := &dtlsdial.Dialer{
-			HandshakeTimeout: s.opts.TCPHandshakeTimeout,
-			HandshakeSem:     make(chan struct{}, s.opts.HandshakeConcurrency),
-		}
-		bond := &bondclient.Handler{Deps: bondclient.Deps{Log: log}}
-		deps := &tcpfwd.Deps{
-			DTLSDialer:       dialer,
-			Log:              log,
-			BondHandler:      bond.Handle,
-			ConnectedStreams: &s.connected,
-			OnTURNServer:     routeCallback,
-		}
-		params := &tcpfwd.Params{
-			Host:         s.cfg.TURN.Host,
-			Port:         s.cfg.TURN.Port,
-			TransportUDP: s.cfg.TURN.TransportUDP,
-			Profile:      string(s.cfg.Obf.Profile),
-			ObfKey:       s.cfg.Obf.Key,
-			GetCreds:     tcpfwd.GetCredsFunc(getCreds),
-			KCPProfile:   s.cfg.KCP.Profile,
-			KCPFEC:       s.cfg.KCP.FEC,
-			ClientID:     s.cfg.ClientID,
-			TrafficStats: s.trafficStats(),
-		}
-		return tcpfwd.Run(ctx, deps, params, peer, s.cfg.Proxy.Listen, s.total, s.cfg.Proxy.Mode == config.ProxyModeTCPFwdBond)
 	}
 
 	local, err := s.localConn(ctx)

@@ -53,7 +53,7 @@ func TestWrapIntoRoundTrip(t *testing.T) {
 	cli, _ := NewConn(key, false)
 	srv, _ := NewConn(key, true)
 
-	payload := []byte("xray tcp bytes over smux")
+	payload := []byte("wireguard bytes over relay")
 	dst := make([]byte, MaxWire(len(payload)))
 	n, err := cli.WrapInto(dst, payload)
 	if err != nil {

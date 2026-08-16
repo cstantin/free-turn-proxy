@@ -17,8 +17,6 @@ type Config struct {
 	Provider       string
 	Peer           string
 	Transport      string
-	Mode           string
-	Bond           bool
 	ObfProfile     string
 	ObfKey         string
 	N              int
@@ -37,8 +35,6 @@ type wire struct {
 	Provider       string `json:"provider"`
 	Peer           string `json:"peer"`
 	Transport      string `json:"transport,omitempty"`
-	Mode           string `json:"mode,omitempty"`
-	Bond           bool   `json:"bond,omitempty"`
 	Obf            string `json:"obf,omitempty"`
 	Key            string `json:"key,omitempty"`
 	N              int    `json:"n,omitempty"`
@@ -85,8 +81,6 @@ func Parse(s string) (*Config, error) {
 		Provider:       w.Provider,
 		Peer:           w.Peer,
 		Transport:      w.Transport,
-		Mode:           w.Mode,
-		Bond:           w.Bond,
 		ObfProfile:     w.Obf,
 		ObfKey:         w.Key,
 		N:              w.N,
@@ -107,8 +101,6 @@ func (c *Config) String() string {
 		Provider:       c.Provider,
 		Peer:           c.Peer,
 		Transport:      c.Transport,
-		Mode:           c.Mode,
-		Bond:           c.Bond,
 		N:              c.N,
 		StreamsPerCred: c.StreamsPerCred,
 		ClientID:       c.ClientID,

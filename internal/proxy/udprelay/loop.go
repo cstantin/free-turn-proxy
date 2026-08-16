@@ -12,9 +12,8 @@ import (
 	"github.com/cbeuw/connutil"
 	"github.com/samosvalishe/free-turn-proxy/internal/clientsdb"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider"
-	"github.com/samosvalishe/free-turn-proxy/internal/proxy/common"
 	"github.com/samosvalishe/free-turn-proxy/internal/randx"
-	"github.com/samosvalishe/free-turn-proxy/internal/stats"
+	"github.com/samosvalishe/free-turn-proxy/internal/wire"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire/shape"
 )
 
@@ -168,10 +167,6 @@ func oneDTLS(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		}
 	}()
 
-	var countedConn net.Conn = dtlsConn
-	if params.TrafficStats != nil {
-		countedConn = &stats.CountingConn{Conn: countedConn, Stats: params.TrafficStats}
-	}
 	for {
 		select {
 		case <-dtlsctx.Done():
@@ -179,7 +174,7 @@ func oneDTLS(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		case <-forwardDone:
 			return errors.New("DTLS connection closed by remote peer")
 		case pkt := <-inboundChan:
-			_, err := countedConn.Write(pkt.Data[:pkt.N])
+			_, err := dtlsConn.Write(pkt.Data[:pkt.N])
 			packetPool.Put(pkt)
 			if err != nil {
 				return fmt.Errorf("failed to forward packet to DTLS: %w", err)
@@ -194,12 +189,10 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		c <- err
 	}()
 
-	stream, derr := common.DialTURN(ctx, params.Host, params.Port, params.TransportUDP, peer, streamID, params.GetCreds)
+	stream, derr := DialTURN(ctx, params.Host, params.Port, params.TransportUDP, peer, streamID, params.GetCreds)
 	if derr != nil {
-		if deps.Auth.IsAuthError(derr) && deps.Auth.HandleAuthError(streamID) {
-			deps.log().Errorf("[STREAM %d] Fatal error fetching TURN credentials", streamID)
-			err = provider.ErrFatalNoStreams
-			return
+		if deps.Auth.IsAuthError(derr) {
+			deps.Auth.HandleAuthError(streamID)
 		}
 		err = fmt.Errorf("connect to TURN server: %w", derr)
 		return
@@ -231,8 +224,15 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 	turnctx, turncancel := context.WithCancel(ctx)
 	defer turncancel()
 
+	// без дедлайна relayConn.ReadFrom не проснётся на отмене turnctx - wg.Wait встанет намертво
+	context.AfterFunc(turnctx, func() {
+		if err := relayConn.SetDeadline(time.Now()); err != nil {
+			deps.log().Errorf("[STREAM %d] Failed to set relay deadline: %s", streamID, err)
+		}
+	})
+
 	var internalPipeAddr atomic.Value
-	obfConn, obfErr := common.NewClientObf(params.Profile, params.ObfKey)
+	obfConn, obfErr := wire.NewClientCodec(params.Profile, params.ObfKey)
 	if obfErr != nil {
 		deps.log().Errorf("[STREAM %d] OBF init failed: %v", streamID, obfErr)
 		return

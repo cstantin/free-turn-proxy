@@ -32,7 +32,7 @@ func TestParseClientJSONAppliesFields(t *testing.T) {
 		"peer": "5.6.7.8:56000",
 		"clientId": "abc",
 		"turn":  {"n": 3, "transport": "udp"},
-		"proxy": {"mode": "tcp", "bond": true, "listen": "127.0.0.1:1080"},
+		"proxy": {"listen": "127.0.0.1:1080"},
 		"vk":    {"links": ["A", "B"], "streamsPerCred": 4, "manualCaptcha": true, "platform": "mobile"},
 		"obf":   {"profile": "rtpopus3", "key": "` + testObfKey + `"},
 		"dns":   {"mode": "doh", "servers": ["1.1.1.1", "8.8.8.8"]},
@@ -46,7 +46,7 @@ func TestParseClientJSONAppliesFields(t *testing.T) {
 	if c.TURN.N != 3 || !c.TURN.TransportUDP {
 		t.Errorf("TURN = %+v", c.TURN)
 	}
-	if c.Proxy.Mode != ProxyModeTCPFwdBond || c.Proxy.Listen != "127.0.0.1:1080" {
+	if c.Proxy.Listen != "127.0.0.1:1080" {
 		t.Errorf("Proxy = %+v", c.Proxy)
 	}
 	if len(c.VK.Links) != 2 || c.VK.Platform != PlatformMobile || !c.VK.ManualCaptcha {
@@ -64,8 +64,8 @@ func TestParseClientJSONAppliesFields(t *testing.T) {
 }
 
 func TestParseClientJSONRunsValidate(t *testing.T) {
-	in := `{"peer":"1.2.3.4:5000","vk":{"links":["A"]},"proxy":{"mode":"tcp"},` +
-		`"obf":{"profile":"rtpopus3","key":"` + testObfKey + `","timingMs":20}}`
+	in := `{"peer":"1.2.3.4:5000","vk":{"links":["A"]},` +
+		`"obf":{"profile":"none","timingMs":20}}`
 	_, err := ParseClientJSON([]byte(in), "")
 	if err == nil || !strings.Contains(err.Error(), "-obf-timing") {
 		t.Fatalf("ParseClientJSON() error = %v, want obf-timing rule", err)

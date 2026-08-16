@@ -1,12 +1,10 @@
 package config
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
-	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcptun"
 	"github.com/samosvalishe/free-turn-proxy/internal/tunnel"
 	"github.com/samosvalishe/free-turn-proxy/internal/uri"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire/rtpopus"
@@ -26,8 +24,6 @@ type raw struct {
 	N              int
 	StreamsPerCred int
 	Transport      string
-	Mode           string
-	Bond           bool
 
 	ObfProfile string
 	ObfKey     string
@@ -57,12 +53,6 @@ func (r *raw) applyURI(u *uri.Config) {
 	}
 	if u.Transport != "" {
 		r.Transport = u.Transport
-	}
-	if u.Mode != "" {
-		r.Mode = u.Mode
-	}
-	if u.Bond {
-		r.Bond = true
 	}
 	if u.N > 0 {
 		r.N = u.N
@@ -102,15 +92,6 @@ func assemble(r raw) (*Client, error) {
 	default:
 		return nil, fmt.Errorf("invalid -transport value %q: must be %s | %s", r.Transport, TransportTCP, TransportUDP)
 	}
-	switch r.Mode {
-	case ModeUDP, ModeTCP:
-	default:
-		return nil, fmt.Errorf("invalid -mode value %q: must be %s | %s", r.Mode, ModeUDP, ModeTCP)
-	}
-	if r.Bond && r.Mode != ModeTCP {
-		return nil, errors.New("-bond requires -mode tcp")
-	}
-
 	n := r.N
 	if n <= 0 {
 		n = DefaultStreams
@@ -137,7 +118,6 @@ func assemble(r raw) (*Client, error) {
 			Timing:  r.ObfTiming,
 		},
 		Proxy: ProxyOpts{
-			Mode:   clientProxyMode(r.Mode, r.Bond),
 			Listen: r.Listen,
 			Peer:   r.Peer,
 		},
@@ -150,10 +130,6 @@ func assemble(r raw) (*Client, error) {
 		},
 		DNS: DNSOpts{Mode: r.DNSMode},
 		Log: LogOpts{Debug: r.Debug},
-		KCP: KCPOpts{
-			Profile: kcptun.DefaultProfile(),
-			FEC:     kcptun.FEC{},
-		},
 		Tunnel: TunnelOpts{
 			Mode:   tunnel.Mode(r.TunnelMode),
 			Config: r.TunnelConfig,
@@ -208,22 +184,4 @@ func normalizeVKLinks(links, link string) []string {
 		return nil
 	}
 	return out
-}
-
-func clientProxyMode(mode string, bond bool) ProxyMode {
-	switch {
-	case mode == ModeTCP && bond:
-		return ProxyModeTCPFwdBond
-	case mode == ModeTCP:
-		return ProxyModeTCPFwd
-	default:
-		return ProxyModeUDP
-	}
-}
-
-func serverProxyMode(mode string) ProxyMode {
-	if mode == ModeTCP {
-		return ProxyModeTCPFwd
-	}
-	return ProxyModeUDP
 }

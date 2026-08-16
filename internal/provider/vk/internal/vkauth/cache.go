@@ -30,9 +30,8 @@ func NewStore(streamsPerCache int) *Store {
 }
 
 // CacheID группирует потоки в блоки по streamsPerCache: потоки 1..streamsPerCache
-// делят один кэш реквизитов, streamsPerCache+1.. - следующий. streamID 1-based
-// (единый базис udprelay и tcpfwd); первый поток блока инициирует fetch к VK,
-// остальные переиспользуют тёплый кэш.
+// делят один кэш реквизитов, streamsPerCache+1.. - следующий. streamID 1-based;
+// первый поток блока инициирует fetch к VK, остальные переиспользуют тёплый кэш.
 func (s *Store) CacheID(streamID int) int {
 	if streamID < 1 {
 		return 0

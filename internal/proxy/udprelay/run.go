@@ -10,13 +10,10 @@ import (
 	"time"
 
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
-	"github.com/samosvalishe/free-turn-proxy/internal/proxy/common"
 	"github.com/samosvalishe/free-turn-proxy/internal/stats"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/wake"
 )
-
-type GetCredsFunc = common.GetCredsFunc
 
 // AuthHandler определяет интерфейс взаимодействия с провайдером при ошибках авторизации.
 type AuthHandler interface {

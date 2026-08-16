@@ -757,17 +757,35 @@ func SafeURL(raw string) string {
 	return out
 }
 
-func captchaFormSummary(values [][2]string) string {
+func captchaDomainFromRedirectURI(redirectURI string) string {
+	u, err := neturl.Parse(redirectURI)
+	if err != nil {
+		return captchaDomain
+	}
+	domain := strings.TrimSpace(u.Query().Get("domain"))
+	if domain == "" {
+		return captchaDomain
+	}
+	return domain
+}
+
+// Ключи сортируются: логи двух прогонов должны диффиться построчно.
+func captchaFormSummary(values neturl.Values) string {
 	if len(values) == 0 {
 		return "none"
 	}
-	parts := make([]string, 0, len(values))
-	for _, kv := range values {
-		switch kv[0] {
+	keys := make([]string, 0, len(values))
+	for k := range values {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		switch k {
 		case "session_token", "browser_fp", "hash", "answer", "debug_info", "device", "settings_key", "captcha_settings":
-			parts = append(parts, fmt.Sprintf("%s:%d", kv[0], len(kv[1])))
+			parts = append(parts, fmt.Sprintf("%s:%d", k, len(values.Get(k))))
 		default:
-			parts = append(parts, kv[0])
+			parts = append(parts, k)
 		}
 	}
 	return strings.Join(parts, ",")

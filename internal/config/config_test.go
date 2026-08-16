@@ -51,9 +51,6 @@ func TestParseClient_Defaults(t *testing.T) {
 	if c.Obf.Enabled() {
 		t.Errorf("Obf.Enabled() should be false when profile=none")
 	}
-	if c.Proxy.Mode != ProxyModeUDP {
-		t.Errorf("Proxy.Mode default: %q (expected udp)", c.Proxy.Mode)
-	}
 }
 
 func TestParseClient_VKLinkStrip(t *testing.T) {
@@ -144,14 +141,6 @@ func TestParseClient_PlatformInvalid(t *testing.T) {
 	}
 }
 
-func TestParseClient_BondWithoutTCPMode(t *testing.T) {
-	args := append(validClientArgs(), "-bond")
-	_, err := ParseClient(args, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "-bond requires -mode tcp") {
-		t.Errorf("expected bond error, got %v", err)
-	}
-}
-
 func TestParseClient_ObfMissingKey(t *testing.T) {
 	args := append(validClientArgs(), "-obf-profile", "rtpopus")
 	_, err := ParseClient(args, io.Discard)
@@ -193,14 +182,6 @@ func TestParseClient_ObfTimingRequiresObf(t *testing.T) {
 	}
 }
 
-func TestParseClient_ObfTimingRejectsTCP(t *testing.T) {
-	args := append(validClientArgs(), "-mode", "tcp", "-obf-profile", "rtpopus3", "-obf-key", testObfKey, "-obf-timing", "20ms")
-	_, err := ParseClient(args, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "-obf-timing") {
-		t.Errorf("expected obf-timing/mode error, got %v", err)
-	}
-}
-
 func TestParseClient_ObfTimingValid(t *testing.T) {
 	args := append(validClientArgs(), "-obf-profile", "rtpopus3", "-obf-key", testObfKey, "-obf-timing", "20ms")
 	c, err := ParseClient(args, io.Discard)
@@ -209,14 +190,6 @@ func TestParseClient_ObfTimingValid(t *testing.T) {
 	}
 	if c.Obf.Timing != 20*time.Millisecond {
 		t.Errorf("Obf.Timing = %v, want 20ms", c.Obf.Timing)
-	}
-}
-
-func TestParseServer_ObfTimingRejectsTCP(t *testing.T) {
-	args := []string{"-connect", "127.0.0.1:51820", "-mode", "tcp", "-obf-profile", "rtpopus3", "-obf-key", testObfKey, "-obf-timing", "10ms"}
-	_, err := ParseServer(args, io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "-obf-timing") {
-		t.Errorf("expected obf-timing/mode error, got %v", err)
 	}
 }
 
@@ -276,31 +249,6 @@ func TestParseClient_HelpReturnsErrHelp(t *testing.T) {
 	}
 }
 
-func TestParseClient_ProxyMode(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want ProxyMode
-	}{
-		{"default-udp", nil, ProxyModeUDP},
-		{"tcp", []string{"-mode", "tcp"}, ProxyModeTCPFwd},
-		{"tcp-bond", []string{"-mode", "tcp", "-bond"}, ProxyModeTCPFwdBond},
-		{"default-udp-no-bond", nil, ProxyModeUDP},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			args := append(validClientArgs(), tc.args...)
-			c, err := ParseClient(args, io.Discard)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if c.Proxy.Mode != tc.want {
-				t.Errorf("Proxy.Mode = %q, want %q", c.Proxy.Mode, tc.want)
-			}
-		})
-	}
-}
-
 func TestParseServer_Defaults(t *testing.T) {
 	s, err := ParseServer([]string{"-connect", "backend:1234"}, io.Discard)
 	if err != nil {
@@ -311,9 +259,6 @@ func TestParseServer_Defaults(t *testing.T) {
 	}
 	if s.Proxy.Connect != "backend:1234" {
 		t.Errorf("Proxy.Connect: %q", s.Proxy.Connect)
-	}
-	if s.Proxy.Mode != ProxyModeUDP {
-		t.Errorf("Proxy.Mode default: %q", s.Proxy.Mode)
 	}
 }
 
@@ -368,12 +313,9 @@ func TestParseServer_GenObfKeySkipsConnectCheck(t *testing.T) {
 	}
 }
 
-func TestParseServer_ProxyMode(t *testing.T) {
-	s, err := ParseServer([]string{"-connect", "x:1", "-mode", "tcp"}, io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s.Proxy.Mode != ProxyModeTCPFwd {
-		t.Errorf("Proxy.Mode = %q, want tcpfwd", s.Proxy.Mode)
+func TestParseServer_RejectsRemovedModeFlag(t *testing.T) {
+	_, err := ParseServer([]string{"-connect", "x:1", "-mode", "tcp"}, io.Discard)
+	if err == nil {
+		t.Error("expected error on removed -mode flag")
 	}
 }

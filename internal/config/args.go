@@ -43,14 +43,6 @@ func ClientArgs(c *Client) []string {
 	if c.TURN.TransportUDP != def.TURN.TransportUDP {
 		add("-transport", TransportUDP)
 	}
-	switch c.Proxy.Mode {
-	case ProxyModeTCPFwd:
-		add("-mode", ModeTCP)
-	case ProxyModeTCPFwdBond:
-		add("-mode", ModeTCP)
-		args = append(args, "-bond")
-	case ProxyModeUDP:
-	}
 	if c.Obf.Enabled() {
 		add("-obf-profile", string(c.Obf.Profile))
 		add("-obf-key", hex.EncodeToString(c.Obf.Key))

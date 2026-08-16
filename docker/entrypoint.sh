@@ -11,10 +11,6 @@ esac
 
 set -- -listen "$LISTEN" -connect "$CONNECT"
 
-if [ "${MODE}" = "tcp" ]; then
-    set -- "$@" -mode tcp
-fi
-
 if [ -n "${OBF_PROFILE}" ] && [ "${OBF_PROFILE}" != "none" ]; then
     OBF="${OBF_KEY:?OBF_KEY is required when OBF_PROFILE != none}"
     set -- "$@" -obf-profile "$OBF_PROFILE" -obf-key "$OBF"

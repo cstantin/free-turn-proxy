@@ -3,7 +3,6 @@ package stats
 
 import (
 	"fmt"
-	"net"
 	"sync/atomic"
 	"time"
 )
@@ -57,33 +56,4 @@ func FormatBitsPerSecond(bytes uint64, interval time.Duration) string {
 		return fmt.Sprintf("%.1f kbit/s", bps/1_000)
 	}
 	return fmt.Sprintf("%.0f bit/s", bps)
-}
-
-// FormatByteCount форматирует количество байт в человекочитаемый вид (B, KiB, MiB).
-func FormatByteCount(bytes uint64) string {
-	if bytes >= 1024*1024 {
-		return fmt.Sprintf("%.2f MiB", float64(bytes)/(1024*1024))
-	}
-	if bytes >= 1024 {
-		return fmt.Sprintf("%.1f KiB", float64(bytes)/1024)
-	}
-	return fmt.Sprintf("%d B", bytes)
-}
-
-// CountingConn оборачивает net.Conn и учитывает прочитанные/записанные байты в Stats.
-type CountingConn struct {
-	net.Conn
-	Stats *Stats
-}
-
-func (c *CountingConn) Read(p []byte) (int, error) {
-	n, err := c.Conn.Read(p)
-	c.Stats.AddRx(n)
-	return n, err
-}
-
-func (c *CountingConn) Write(p []byte) (int, error) {
-	n, err := c.Conn.Write(p)
-	c.Stats.AddTx(n)
-	return n, err
 }

@@ -43,23 +43,19 @@ func Validate(c *Client) error {
 	if err := validateObfProfile(c.Obf.Profile); err != nil {
 		return err
 	}
-	if err := validateTunnel(c.Tunnel, c.Proxy.Mode); err != nil {
+	if err := validateTunnel(c.Tunnel); err != nil {
 		return err
 	}
-	return validateObfTiming(c.Obf, c.Proxy.Mode)
+	return validateObfTiming(c.Obf)
 }
 
-// validateTunnel проверяет параметры userspace-туннеля (доступен только в mode udp).
-func validateTunnel(t TunnelOpts, mode ProxyMode) error {
+func validateTunnel(t TunnelOpts) error {
 	if t.Mode != "" && !t.Mode.Valid() {
 		return fmt.Errorf("invalid tunnel mode %q: must be %s | %s | %s",
 			t.Mode, tunnel.ModeNone, tunnel.ModeWG, tunnel.ModeAWG)
 	}
 	if !t.Enabled() {
 		return nil
-	}
-	if mode != ProxyModeUDP {
-		return errors.New("tunnel requires proxy mode udp")
 	}
 	if strings.TrimSpace(t.Config) == "" {
 		return errors.New("tunnel config is required")
@@ -80,19 +76,15 @@ func ValidateServer(s *Server) error {
 	if err := validateObfProfile(s.Obf.Profile); err != nil {
 		return err
 	}
-	return validateObfTiming(s.Obf, s.Proxy.Mode)
+	return validateObfTiming(s.Obf)
 }
 
-// validateObfTiming проверяет pacing (только для режима udp с включенной обфускацией).
-func validateObfTiming(o ObfOpts, mode ProxyMode) error {
+func validateObfTiming(o ObfOpts) error {
 	if o.Timing <= 0 {
 		return nil
 	}
 	if !o.Enabled() {
 		return errors.New("-obf-timing requires -obf-profile != none")
-	}
-	if mode != ProxyModeUDP {
-		return errors.New("-obf-timing supported only with -mode udp")
 	}
 	return nil
 }

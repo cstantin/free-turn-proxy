@@ -4,17 +4,7 @@ package config
 import (
 	"time"
 
-	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcptun"
 	"github.com/samosvalishe/free-turn-proxy/internal/tunnel"
-)
-
-// ProxyMode задаёт тип прикладного трафика в TURN-туннеле.
-type ProxyMode string
-
-const (
-	ProxyModeUDP        ProxyMode = "udp"         // -mode udp (default): UDP-релей пакетов (WireGuard)
-	ProxyModeTCPFwd     ProxyMode = "tcpfwd"      // -mode tcp: TCP-форвардер через smux
-	ProxyModeTCPFwdBond ProxyMode = "tcpfwd-bond" // -mode tcp -bond: bond TCP по N smux-сессиям
 )
 
 type TURNOpts struct {
@@ -44,7 +34,6 @@ type ObfOpts struct {
 func (o ObfOpts) Enabled() bool { return o.Profile != ObfProfileNone }
 
 type ProxyOpts struct {
-	Mode    ProxyMode
 	Listen  string
 	Connect string
 	Peer    string
@@ -81,11 +70,6 @@ type LogOpts struct {
 	Debug bool
 }
 
-type KCPOpts struct {
-	Profile kcptun.Profile
-	FEC     kcptun.FEC
-}
-
 // TunnelOpts - параметры встроенного WireGuard/AmneziaWG userspace-туннеля.
 type TunnelOpts struct {
 	Mode   tunnel.Mode
@@ -103,7 +87,6 @@ type Client struct {
 	VK       VKOpts
 	DNS      DNSOpts
 	Log      LogOpts
-	KCP      KCPOpts
 	Tunnel   TunnelOpts
 	ClientID string
 	SubURL   string
@@ -114,6 +97,5 @@ type Server struct {
 	Obf         ObfOpts
 	Proxy       ProxyOpts
 	Log         LogOpts
-	KCP         KCPOpts
 	ClientsFile string
 }

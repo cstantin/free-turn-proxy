@@ -17,8 +17,6 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/clientsdb"
 	"github.com/samosvalishe/free-turn-proxy/internal/config"
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
-	"github.com/samosvalishe/free-turn-proxy/internal/proxy/bondserver"
-	"github.com/samosvalishe/free-turn-proxy/internal/proxy/tcpfwdserver"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/udpserver"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire"
@@ -76,8 +74,8 @@ func main() {
 		logger.Errorf("resolve listen addr: %v", err)
 		os.Exit(1)
 	}
-	logger.Infof("Starting server listen=%s connect=%s mode=%s obf-profile=%s bond-autodetect=true",
-		cfg.Proxy.Listen, cfg.Proxy.Connect, cfg.Proxy.Mode, cfg.Obf.Profile)
+	logger.Infof("Starting server listen=%s connect=%s obf-profile=%s",
+		cfg.Proxy.Listen, cfg.Proxy.Connect, cfg.Obf.Profile)
 	if !cfg.Obf.Enabled() {
 		logger.Warnf("running with -obf-profile=none: any client reaching %s can relay to %s (no shared-key auth)", cfg.Proxy.Listen, cfg.Proxy.Connect)
 	}
@@ -118,8 +116,6 @@ func main() {
 
 	logger.Infof("Listening on %s", cfg.Proxy.Listen)
 
-	registry := bondserver.NewRegistry(bondserver.Deps{Log: logger})
-
 	var db *clientsdb.DB
 	if cfg.ClientsFile != "" {
 		d, err := clientsdb.New(cfg.ClientsFile)
@@ -150,12 +146,12 @@ func main() {
 			continue
 		}
 		wg.Go(func() {
-			handleAccepted(ctx, logger, registry, db, conn, cfg)
+			handleAccepted(ctx, logger, db, conn, cfg)
 		})
 	}
 }
 
-func handleAccepted(ctx context.Context, logger logx.Logger, registry *bondserver.Registry, db *clientsdb.DB, conn net.Conn, cfg *config.Server) {
+func handleAccepted(ctx context.Context, logger logx.Logger, db *clientsdb.DB, conn net.Conn, cfg *config.Server) {
 	defer func() {
 		if closeErr := conn.Close(); closeErr != nil {
 			logger.Warnf("failed to close incoming connection: %s", closeErr)
@@ -194,11 +190,7 @@ func handleAccepted(ctx context.Context, logger logx.Logger, registry *bondserve
 		logger.Debugf("Client ID received (no allowlist): %s", clientID)
 	}
 
-	if cfg.Proxy.Mode == config.ProxyModeTCPFwd {
-		tcpfwdserver.Handle(ctx, logger, registry, dtlsConn, cfg.Proxy.Connect, cfg.KCP.Profile, cfg.KCP.FEC)
-	} else {
-		udpserver.Handle(ctx, logger, conn, cfg.Proxy.Connect)
-	}
+	udpserver.Handle(ctx, logger, conn, cfg.Proxy.Connect)
 
 	logger.Debugf("Connection closed: %s", conn.RemoteAddr())
 }
