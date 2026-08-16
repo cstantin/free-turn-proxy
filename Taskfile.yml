@@ -98,6 +98,11 @@ tasks:
     cmds:
       - govulncheck ./...
 
+  captcha:page:
+    desc: Fetch a live VK captcha page (diff it against the parser fixture)
+    cmds:
+      - bash scripts/captcha_page.sh {{.CLI_ARGS | default "captcha_page.html"}}
+
   tidy:
     desc: Tidy go.mod / go.sum
     cmds:

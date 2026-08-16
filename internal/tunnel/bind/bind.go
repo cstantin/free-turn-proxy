@@ -36,7 +36,17 @@ func NewSinglePeerBind(pc net.PacketConn) *SinglePeerBind {
 	return &SinglePeerBind{pc: pc}
 }
 
+// Open снимает следы прошлого Close. Устройство закрывает Bind на каждом
+// BindUpdate и следом открывает заново, причём первый такой круг проходит ещё в
+// IpcSet (из-за listen_port), когда устройство даже не поднято. Без сброса
+// приёмник стартовал бы с дедлайном в прошлом и умирал на первом же чтении.
+//
+// Гонки со старым читателем нет: closeBindLocked ждёт их остановки до Open.
 func (b *SinglePeerBind) Open(uint16) ([]conn.ReceiveFunc, uint16, error) {
+	b.closed.Store(false)
+	if err := b.pc.SetReadDeadline(time.Time{}); err != nil {
+		return nil, 0, err
+	}
 	return []conn.ReceiveFunc{b.receive}, 0, nil
 }
 
@@ -77,8 +87,9 @@ func (*SinglePeerBind) BatchSize() int { return 1 }
 // SetMark - no-op: SO_MARK ставят на сокете, а его здесь нет.
 func (*SinglePeerBind) SetMark(uint32) error { return nil }
 
-// Close прекращает работу Bind. Сам канал не закрывается - им владеет тот, кто
-// его создал; после Close все ReceiveFunc отдают net.ErrClosed.
+// Close прекращает работу Bind до следующего Open. Сам канал не закрывается -
+// им владеет тот, кто его создал; пока Bind закрыт, ReceiveFunc отдают
+// net.ErrClosed.
 func (b *SinglePeerBind) Close() error {
 	if !b.closed.CompareAndSwap(false, true) {
 		return nil

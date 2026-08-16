@@ -16,6 +16,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/common"
 	"github.com/samosvalishe/free-turn-proxy/internal/stats"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
+	"github.com/samosvalishe/free-turn-proxy/internal/wake"
 )
 
 // GetCredsFunc реэкспортирован из common, чтобы вызывающие не выходили за пределы импортов пакета.
@@ -68,6 +69,10 @@ type Deps struct {
 	// OnTURNServer вызывается при обнаружении IP TURN-сервера.
 	// Используется для автоматического управления маршрутами. nil - no-op.
 	OnTURNServer func(ip net.IP)
+	// Wake сигналит о пробуждении устройства: аллокации за время сна умерли, а
+	// ждать этого от ChannelBind refresh - до ~10 минут молчащего туннеля.
+	// nil - сигнала нет.
+	Wake *wake.Notifier
 	// fatalCh - внутренний сигнальный канал; устанавливается Run, пишется
 	// TURNLoop, читается Run для проброса фатальной ошибки наверх.
 	fatalCh chan error
@@ -79,6 +84,9 @@ func (d *Deps) log() logx.Logger {
 	}
 	return d.Log
 }
+
+// woke - канал ближайшего пробуждения. Брать заново после каждого срабатывания.
+func (d *Deps) woke() <-chan struct{} { return d.Wake.Chan() }
 
 // Run - точка входа UDP-режима. Читает пакеты локального пира из listenConn,
 // распределяет их в общую очередь и запускает numStreams пар (DTLSLoop, TURNLoop).
@@ -92,7 +100,7 @@ func (d *Deps) log() logx.Logger {
 // Возвращается после выхода всех потоков (т.е. при отмене ctx).
 // При фатальной provider-ошибке возвращает ErrFatal - вызывающий делает
 // os.Exit без вмешательства udprelay в хост-процесс.
-func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, logger logx.Logger, connectedStreams *atomic.Int32, onTURNServer func(net.IP), params *Params, peer *net.UDPAddr, listenConn net.PacketConn, numStreams int) error {
+func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, logger logx.Logger, connectedStreams *atomic.Int32, onTURNServer func(net.IP), waker *wake.Notifier, params *Params, peer *net.UDPAddr, listenConn net.PacketConn, numStreams int) error {
 	context.AfterFunc(ctx, func() {
 		if closeErr := listenConn.Close(); closeErr != nil {
 			logger.Errorf("udprelay: close local connection: %s", closeErr)
@@ -112,6 +120,7 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 		ActiveLocalPeer:  &activeLocalPeer,
 		ConnectedStreams: connectedStreams,
 		OnTURNServer:     onTURNServer,
+		Wake:             waker,
 		fatalCh:          fatalCh,
 	}
 

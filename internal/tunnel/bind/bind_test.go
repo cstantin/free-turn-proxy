@@ -123,6 +123,44 @@ func TestSinglePeerBindCloseWakesReceiver(t *testing.T) {
 	}
 }
 
+// Устройство закрывает Bind и открывает заново на каждом BindUpdate, а первый
+// такой круг проходит ещё в IpcSet (listen_port), до Up. Приёмник после этого
+// обязан читать: иначе handshake уходит, а ответ читать некому.
+func TestSinglePeerBindReopenAfterClose(t *testing.T) {
+	device, relay := netconn.PacketPipe(0, 0)
+	t.Cleanup(func() {
+		_ = device.Close()
+		_ = relay.Close()
+	})
+
+	bind := NewSinglePeerBind(device)
+	if _, _, err := bind.Open(0); err != nil {
+		t.Fatal(err)
+	}
+	if err := bind.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	fns, _, err := bind.Open(0)
+	if err != nil {
+		t.Fatalf("second Open() error = %v", err)
+	}
+
+	in := []byte("response")
+	if _, err := relay.WriteTo(in, nil); err != nil {
+		t.Fatal(err)
+	}
+	packets := [][]byte{make([]byte, 64)}
+	sizes := make([]int, 1)
+	count, err := fns[0](packets, sizes, make([]conn.Endpoint, 1))
+	if err != nil {
+		t.Fatalf("receive after reopen error = %v", err)
+	}
+	if count != 1 || !bytes.Equal(packets[0][:sizes[0]], in) {
+		t.Fatalf("receive after reopen = %d, %q", count, packets[0][:sizes[0]])
+	}
+}
+
 func TestSinglePeerBindParseEndpointIgnoresInput(t *testing.T) {
 	device, relay := netconn.PacketPipe(0, 0)
 	t.Cleanup(func() {

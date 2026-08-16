@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"net"
 	"strings"
 	"testing"
 
@@ -84,6 +85,27 @@ func TestBuildTunnelWiresPipeToBind(t *testing.T) {
 	}
 }
 
+// Обе половины пары закрывает close: старт мог провалиться до сессии, и тогда
+// освобождать их больше некому. Повторный вызов безопасен.
+func TestTunnelPartsCloseReleasesPipes(t *testing.T) {
+	cfg := parsedConfig(t, tunnelConfigJSON(t, "wg", wgConf()))
+
+	parts, _, err := buildTunnel(cfg, logx.Nop())
+	if err != nil {
+		t.Fatalf("buildTunnel() error = %v", err)
+	}
+
+	parts.close()
+	parts.close()
+
+	if _, err := parts.relaySide.WriteTo([]byte{1}, nil); !errors.Is(err, net.ErrClosed) {
+		t.Errorf("relaySide.WriteTo() error = %v, want %v", err, net.ErrClosed)
+	}
+	if _, err := parts.deviceSide.WriteTo([]byte{1}, nil); !errors.Is(err, net.ErrClosed) {
+		t.Errorf("deviceSide.WriteTo() error = %v, want %v", err, net.ErrClosed)
+	}
+}
+
 // mode=wg - осознанный выбор пользователя: маскировка снимается, даже если
 // конфиг принесли от AmneziaWG.
 func TestBuildTunnelStripsAmneziaInWGMode(t *testing.T) {
@@ -156,6 +178,47 @@ func TestValidateConfigRejectsUnknownTunnelMode(t *testing.T) {
 	msg := ValidateConfig(tunnelConfigJSON(t, "openvpn", wgConf()))
 	if !strings.Contains(msg, "invalid tunnel mode") {
 		t.Fatalf("ValidateConfig() = %q, want invalid-mode error", msg)
+	}
+}
+
+func TestParseTunnelConfig(t *testing.T) {
+	conf := "[Interface]\nPrivateKey = " + wgKey(1) + "\nAddress = 10.8.0.2/32, fd00::2/128\n" +
+		"DNS = 1.1.1.1, 8.8.8.8\nMTU = 1420\n\n" +
+		"[Peer]\nPublicKey = " + wgKey(2) + "\nAllowedIPs = 0.0.0.0/0\n\n" +
+		"[Peer]\nPublicKey = " + wgKey(3) + "\nAllowedIPs = 0.0.0.0/0, 10.9.0.0/24\n"
+
+	p, err := ParseTunnelConfig(conf, 0)
+	if err != nil {
+		t.Fatalf("ParseTunnelConfig() error = %v", err)
+	}
+	if p.Addresses != "10.8.0.2/32,fd00::2/128" {
+		t.Errorf("Addresses = %q", p.Addresses)
+	}
+	if p.DNS != "1.1.1.1,8.8.8.8" {
+		t.Errorf("DNS = %q", p.DNS)
+	}
+	// Маршрут, повторённый у второго пира, приходит один раз.
+	if p.AllowedIPs != "0.0.0.0/0,10.9.0.0/24" {
+		t.Errorf("AllowedIPs = %q", p.AllowedIPs)
+	}
+	if p.MTU != 1420 {
+		t.Errorf("MTU = %d, want 1420", p.MTU)
+	}
+}
+
+func TestParseTunnelConfigMTUOverride(t *testing.T) {
+	p, err := ParseTunnelConfig(wgConf(), 1280)
+	if err != nil {
+		t.Fatalf("ParseTunnelConfig() error = %v", err)
+	}
+	if p.MTU != 1280 {
+		t.Errorf("MTU = %d, want 1280", p.MTU)
+	}
+}
+
+func TestParseTunnelConfigRejectsBroken(t *testing.T) {
+	if _, err := ParseTunnelConfig("[Interface]\nPrivateKey = nonsense\n", 0); err == nil {
+		t.Fatal("ParseTunnelConfig() error = nil for broken config")
 	}
 }
 

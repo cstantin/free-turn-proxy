@@ -31,6 +31,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/routemgr"
 	"github.com/samosvalishe/free-turn-proxy/internal/stats"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
+	"github.com/samosvalishe/free-turn-proxy/internal/wake"
 )
 
 // Phase - стадия подключения сессии.
@@ -60,6 +61,11 @@ const (
 	defaultUDPHandshakeTimeout  = 20 * time.Second
 	defaultTCPHandshakeTimeout  = 30 * time.Second
 	defaultHandshakeConcurrency = 3
+
+	// Детектор сна: тик частый (дёшев), порог с запасом от джиттера таймера, но
+	// сильно меньше 10-минутного времени жизни TURN-аллокации.
+	wakeTick      = 5 * time.Second
+	wakeThreshold = 60 * time.Second
 )
 
 // Options - тайминги и переключатели рантайма. Нулевое значение поля означает
@@ -153,6 +159,7 @@ type Session struct {
 	connected atomic.Int32
 	status    atomic.Pointer[statusInfo]
 	started   atomic.Bool
+	wake      *wake.Notifier
 }
 
 // Сеть не трогает: блокирующие вызовы происходят в Run.
@@ -173,6 +180,7 @@ func New(cfg *config.Client, deps Deps) (*Session, error) {
 		deps:  deps,
 		opts:  deps.Options.withDefaults(),
 		total: total,
+		wake:  wake.New(),
 	}
 	if s.opts.Traffic {
 		s.traffic = newTraffic()
@@ -235,6 +243,14 @@ func (s *Session) Run(ctx context.Context) (err error) {
 		}()
 	}
 
+	bg.Add(1)
+	go func() {
+		defer bg.Done()
+		s.wake.Watch(runCtx, wakeTick, wakeThreshold, func(gap time.Duration) {
+			log.Warnf("device slept for %s - recycling TURN allocations", gap.Truncate(time.Second))
+		})
+	}()
+
 	var watchdogErr error
 	bg.Add(1)
 	go func() {
@@ -255,6 +271,11 @@ func (s *Session) Run(ctx context.Context) (err error) {
 	// Watchdog отменяет контекст сам, поэтому его ошибка приходит именно так.
 	return watchdogErr
 }
+
+// Wake - хост знает про пробуждение раньше собственного детектора (SCREEN_ON,
+// возврат приложения на передний план): стримы бросают backoff и пересоздают
+// TURN-аллокации немедленно. Безопасен из любой горутины и до Run.
+func (s *Session) Wake() { s.wake.Fire() }
 
 // Snapshot - текущее состояние сессии. Безопасен из любой горутины.
 func (s *Session) Snapshot() Snapshot {
@@ -408,7 +429,7 @@ func (s *Session) relay(ctx context.Context, prov provider.Provider, peer *net.U
 		ClientID:     s.cfg.ClientID,
 		TrafficStats: s.trafficStats(),
 	}
-	return udprelay.Run(ctx, dialer, prov, log, &s.connected, routeCallback, params, peer, local, s.total)
+	return udprelay.Run(ctx, dialer, prov, log, &s.connected, routeCallback, s.wake, params, peer, local, s.total)
 }
 
 // localConn открывает канал до локального пира. Обычно это UDP-сокет на

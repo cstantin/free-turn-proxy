@@ -23,10 +23,11 @@ task build:android
 ```go
 func Start(configJSON string) error                 // Запуск в режиме прокси
 func StartTunnel(configJSON string, tunFD int) error // Запуск прокси + WireGuard/AmneziaWG
-func Restart(configJSON string, tunFD int) error     // Перезапуск с ожиданием остановки
+func Restart(configJSON string, tunFD int) error     // Перезапуск с ожиданием остановки (tunFD 0 - без туннеля)
 func Stop()                                         // Остановка сессии
 func GetState() *Snapshot                           // Метрики сессии (State, Rates, Streams)
 func TunnelStats() *TunnelSnapshot                  // Статистика туннеля
+func ParseTunnelConfig(wgText string, mtu int) (*TunnelParams, error) // Параметры tun для платформы
 func SetEventSink(s EventSink)                      // Установка коллбека событий
 func SetProtect(p Protector)                        // Защита сокетов (VpnService.protect)
 func DefaultConfigJSON() string                     // Конфиг с дефолтами
@@ -67,12 +68,24 @@ func Version() string
 
 Текст WireGuard-конфигурации (`wg-quick`) передается в `tunnel.config`. В режиме `wg` параметры обфускации AmneziaWG игнорируются. Поле `Endpoint` из конфига не используется, так как трафик идет через TURN-релей.
 
+Адреса, DNS, маршруты и MTU tun-интерфейса ядро не применяет - это работа платформы. Их отдаёт `ParseTunnelConfig` из того же текста, что уходит в `tunnel.config` (аргумент `mtu` - то же значение, что в `tunnel.mtu`; `0` - взять из конфига):
+
+```kotlin
+val p = Mobile.parseTunnelConfig(wgText, 1280)
+val builder = VpnService.Builder().setMtu(p.mtu.toInt())
+p.addresses.split(",").forEach { builder.addAddress(it.substringBefore("/"), it.substringAfter("/").toInt()) }
+p.dns.split(",").filter { it.isNotEmpty() }.forEach(builder::addDnsServer)
+p.allowedIPs.split(",").forEach { builder.addRoute(it.substringBefore("/"), it.substringAfter("/").toInt()) }
+```
+
 Для `wg`/`awg` требуется `proxy.mode = "udp"` и запуск через `StartTunnel`:
 ```kotlin
-val fd = vpnBuilder.establish()!!.detachFd()
-Mobile.startTunnel(configJson, fd.toLong())
+pfd = builder.establish()!!                     // хранится в сервисе, живёт дольше сессии
+Mobile.startTunnel(configJson, pfd.dup().detachFd().toLong())
 ```
-Ядро берет владение дескриптором и закроет его при остановке. Самостоятельно закрывать `fd` в приложении нельзя во избежание crash.
+Ядро закрывает переданный дескриптор при остановке, поэтому отдаётся копия (`dup`), а оригинал остаётся у приложения: tun переживает `Restart` при смене сети, интерфейс не пересоздаётся и VPN не мигает. На каждый `StartTunnel`/`Restart` с туннелем нужна новая копия; закрывать отданный fd самостоятельно нельзя - ядро закрывает его и когда старт не удался.
+
+`Restart(configJSON, 0)` - перезапуск в режиме прокси: ядро дескриптор не берёт и ничего не закрывает. Конфиг с `tunnel.mode` `wg`/`awg` в этом виде отклоняется (`ErrTunnelRequiresStartTunnel`) - для туннеля передаётся `tunFD > 0`.
 
 WireGuard общается с релеем через in-memory `netconn.PacketPipe` напрямую. Петля `127.0.0.1:9000` не используется, поэтому исключать приложение из VPN-маршрутов не требуется. Защите через `SetProtect` подлежат только сокеты релея.
 

@@ -448,7 +448,7 @@ func newAppDialer(dial dialFunc) net.Dialer {
 // udpDNSDial берёт первый достижимый UDP/53 резолвер из udpDNSServers.
 func udpDNSDial(ctx context.Context, _ string, _ string) (net.Conn, error) {
 	var (
-		d       net.Dialer
+		d       = net.Dialer{Control: netctl.Apply}
 		lastErr error
 	)
 	for _, s := range udpDNSServers() {
@@ -513,7 +513,10 @@ func udpProbe(timeout time.Duration) bool {
 		if remaining <= 0 {
 			break
 		}
-		conn, err := net.DialTimeout("udp", server, remaining) //nolint:noctx
+		// Control обязателен и здесь: непробитый через protect сокет уходит в
+		// туннель, проба врёт "UDP/53 заблокирован" и залипает на DoH навсегда.
+		d := net.Dialer{Timeout: remaining, Control: netctl.Apply}
+		conn, err := d.Dial("udp", server) //nolint:noctx
 		if err != nil {
 			continue
 		}

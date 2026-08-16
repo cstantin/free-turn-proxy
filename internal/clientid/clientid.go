@@ -11,8 +11,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+
+	"github.com/samosvalishe/free-turn-proxy/internal/statedir"
 )
 
 const fileName = "client_config.json"
@@ -31,11 +31,7 @@ func Resolve(id string, paths []string) (resolved string, persisted bool, err er
 		return id, true, nil
 	}
 
-	for _, path := range paths {
-		b, rerr := os.ReadFile(path) //nolint:gosec // имя фиксировано, каталог даёт хост
-		if rerr != nil {
-			continue
-		}
+	for _, b := range statedir.ReadEach(paths) {
 		var f fileFormat
 		if json.Unmarshal(b, &f) == nil && f.ClientID != "" {
 			return f.ClientID, true, nil
@@ -50,42 +46,7 @@ func Resolve(id string, paths []string) (resolved string, persisted bool, err er
 
 	// Маршалинг структуры из одной строки не падает.
 	b, _ := json.MarshalIndent(fileFormat{ClientID: newID}, "", "  ")
-	for _, path := range paths {
-		if os.MkdirAll(filepath.Dir(path), 0o700) != nil {
-			continue
-		}
-		if os.WriteFile(path, b, 0o600) == nil { //nolint:gosec // 0o600 для auth-токена
-			return newID, true, nil
-		}
-	}
-	return newID, false, nil
+	return newID, statedir.WriteFirst(paths, b), nil
 }
 
-// DefaultPaths - кандидаты в порядке предпочтения: рядом с бинарём (desktop,
-// переносимость), затем per-user UserConfigDir и TempDir. На Android каталог
-// бинаря read-only, поэтому запись падает на последние варианты.
-func DefaultPaths() []string {
-	seen := map[string]bool{}
-	var dirs []string
-	add := func(d string) {
-		if d == "" || seen[d] {
-			return
-		}
-		seen[d] = true
-		dirs = append(dirs, d)
-	}
-	if exe, err := os.Executable(); err == nil {
-		add(filepath.Dir(exe))
-	}
-	add(filepath.Dir(os.Args[0]))
-	if cfgDir, err := os.UserConfigDir(); err == nil {
-		add(filepath.Join(cfgDir, "free-turn-proxy"))
-	}
-	add(os.TempDir())
-
-	paths := make([]string, 0, len(dirs))
-	for _, d := range dirs {
-		paths = append(paths, filepath.Join(d, fileName))
-	}
-	return paths
-}
+func DefaultPaths() []string { return statedir.Paths(fileName) }

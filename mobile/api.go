@@ -27,8 +27,10 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/config"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk"
 	"github.com/samosvalishe/free-turn-proxy/internal/session"
+	"github.com/samosvalishe/free-turn-proxy/internal/statedir"
 	"github.com/samosvalishe/free-turn-proxy/internal/sub"
 	"github.com/samosvalishe/free-turn-proxy/internal/tunnel"
+	"github.com/samosvalishe/free-turn-proxy/internal/tunnel/awg"
 )
 
 // Состояния подключения (дублируют session.Phase*).
@@ -46,6 +48,9 @@ const (
 	connectTimeout = 15 * time.Second
 	// Лимит ожидания во избежание конфликта портов при перезапуске.
 	stopTimeout = 5 * time.Second
+	// Отдельный лимит на сворачивание туннеля: устройство закрывается уже после
+	// того, как сессия отпустила свою половину пары.
+	tunnelCloseTimeout = 3 * time.Second
 )
 
 // ErrTunnelRequiresStartTunnel - попытка вызвать Start с tunnel.mode wg/awg.
@@ -75,9 +80,12 @@ type final struct {
 
 var (
 	// mu сериализует Start/Stop; чтение идет мимо.
-	mu       sync.Mutex
-	current  atomic.Pointer[live]
-	lastStop atomic.Pointer[final]
+	mu      sync.Mutex
+	current atomic.Pointer[live]
+	// finishing - сессия, которую снял с current не Stop, а её собственная
+	// горутина: пока та не досворачивала туннель, останавливаться нельзя.
+	finishing atomic.Pointer[live]
+	lastStop  atomic.Pointer[final]
 )
 
 // Snapshot - консистентный срез состояния сессии для тика UI.
@@ -121,6 +129,14 @@ func clampToInt64(u uint64) int64 {
 	return int64(u)
 }
 
+// SetStateDir задаёт каталог состояния между запусками (поколение VK-персоны,
+// кэш TURN-реквизитов). Вызывать до Start.
+//
+// Без него на Android состояние не сохраняется вообще: кандидаты по умолчанию -
+// каталог бинаря, UserConfigDir и TempDir - из app-uid не пишутся. Каталог
+// должен быть приватным для приложения и вне облачного бэкапа (noBackupFilesDir).
+func SetStateDir(path string) { statedir.SetDir(path) }
+
 // Хост строит из него стартовое состояние формы.
 func DefaultConfigJSON() string { return config.DefaultClientJSON() }
 
@@ -151,12 +167,17 @@ func Start(configJSON string) error {
 	return startLocked(configJSON, 0, false)
 }
 
-// Пересоздание сессии с новым конфигом (при смене сети).
+// Пересоздание сессии с новым конфигом (при смене сети). tunFD - свежая копия
+// дескриптора: прежнюю ядро закрыло вместе с устройством. 0 - режим прокси, без
+// туннеля; владение дескриптором ядро берёт только при tunFD > 0.
 func Restart(configJSON string, tunFD int) error {
+	if tunFD < 0 {
+		return fmt.Errorf("bad tun fd %d", tunFD)
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	stopLocked()
-	return startLocked(configJSON, tunFD, true)
+	return startLocked(configJSON, tunFD, tunFD > 0)
 }
 
 func Stop() {
@@ -165,23 +186,68 @@ func Stop() {
 	stopLocked()
 }
 
+// Wake - устройство проснулось (SCREEN_ON, возврат приложения на передний план).
+// Стримы бросают backoff и пересоздают TURN-аллокации, не дожидаясь двух
+// провалов ChannelBind refresh - до ~10 минут молчащего туннеля. Без сессии
+// ничего не делает; собственный детектор сна в ядре работает независимо.
+func Wake() {
+	if l := current.Load(); l != nil {
+		l.sess.Wake()
+	}
+}
+
 func stopLocked() {
 	l := current.Swap(nil)
 	if l == nil {
+		// Сессия кончилась сама, её туннель сворачивает та же горутина - и пока она
+		// не отпустила tun-дескриптор, возврат отсюда означал бы для хоста "VPN
+		// выключен" при живом интерфейсе, а для Restart - второе устройство поверх.
+		if prev := finishing.Swap(nil); prev != nil {
+			waitDone(prev.done, stopTimeout)
+		}
+		lastStop.Store(&final{state: StateIdle})
 		return
 	}
+	finishing.CompareAndSwap(l, nil)
 	l.cancel()
-	select {
-	case <-l.done:
-	case <-time.After(stopTimeout):
+	waitDone(l.done, stopTimeout)
+	// Синхронно: пока устройство не отпустило tun-дескриптор, платформа не снимет
+	// интерфейс - для хоста это "VPN не выключился".
+	closeTunnel(l.tunnel)
+	// Store, а не CAS: явная остановка - это idle, чем бы ни кончилась сессия.
+	lastStop.Store(&final{state: StateIdle})
+}
+
+// Потолок по времени: backend.Down() зависал в upstream amneziawg-go.
+func closeTunnel(t *tunnelParts) {
+	if t == nil {
+		return
 	}
-	// backend.Down() может зависнуть (upstream amneziawg-go): запускаем в горутине,
-	// чтобы не блокировать Restart после истечения stopTimeout.
-	go l.tunnel.close()
-	lastStop.CompareAndSwap(nil, &final{state: StateIdle})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		t.close()
+	}()
+	waitDone(done, tunnelCloseTimeout)
+}
+
+func waitDone(done <-chan struct{}, limit time.Duration) {
+	select {
+	case <-done:
+	case <-time.After(limit):
+	}
 }
 
 func startLocked(configJSON string, tunFD int, withTunnel bool) error {
+	// До Up дескриптор наш: ранний выход (и конфиг без туннеля) иначе оставит
+	// копию хоста висеть до конца процесса.
+	ownFD := withTunnel
+	defer func() {
+		if ownFD {
+			awg.CloseTUNFD(tunFD)
+		}
+	}()
+
 	raw := []byte(configJSON)
 
 	// Подписка отдаёт peer, без которого конфиг не проходит валидацию, поэтому
@@ -257,6 +323,7 @@ func startLocked(configJSON string, tunFD int, withTunnel bool) error {
 
 	// Handshake повторяется в фоне, ждать готовности не нужно.
 	if parts != nil {
+		ownFD = false // Up забирает владение, включая свою неудачу
 		if err := parts.backend.Up(tunCfg, tunFD); err != nil {
 			parts.close()
 			return err
@@ -273,6 +340,7 @@ func startLocked(configJSON string, tunFD int, withTunnel bool) error {
 		tunnel: parts,
 	}
 	current.Store(l)
+	finishing.Store(nil)
 	lastStop.Store(nil)
 
 	go func() {
@@ -280,10 +348,17 @@ func startLocked(configJSON string, tunFD int, withTunnel bool) error {
 		runErr := sess.Run(ctx)
 		cancel()
 
-		// Если Stop перехватил сессию, финальный статус его.
+		// Публикуемся до CAS: Stop, заставший current уже пустым, обязан найти нас
+		// здесь - иначе вернётся, пока туннель ещё сворачивается.
+		finishing.Store(l)
+		// Если Stop перехватил сессию, финальный статус и туннель - его.
 		if !current.CompareAndSwap(l, nil) {
+			finishing.CompareAndSwap(l, nil)
 			return
 		}
+		// Сессия кончилась сама (ошибка, таймаут подключения): без этого устройство
+		// и tun-дескриптор пережили бы её, а Restart поднял бы поверх второе.
+		closeTunnel(l.tunnel)
 		if runErr != nil {
 			lastStop.Store(&final{state: StateError, errMsg: runErr.Error(), total: l.total})
 			return

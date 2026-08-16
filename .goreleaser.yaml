@@ -106,6 +106,12 @@ archives:
 
 checksum:
   name_template: checksums.txt
+  # Mobile artifacts ship via release.extra_files and are not build outputs;
+  # list them here so hosts (Android Gradle fetch) can verify what they download.
+  extra_files:
+    - glob: mobile-dist/freeturn.aar
+    - glob: mobile-dist/freeturn-sources.jar
+    - glob: mobile-dist/Mobile.xcframework.zip
 
 sboms:
   - artifacts: archive

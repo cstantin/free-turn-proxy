@@ -45,16 +45,21 @@ func New(deps Deps) *Backend {
 func (b *Backend) Up(cfg *tunnel.Config, tunFD int) error {
 	uapi, err := tunnel.UAPI(cfg)
 	if err != nil {
+		CloseTUNFD(tunFD)
 		return err
 	}
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.dev != nil {
+		CloseTUNFD(tunFD)
 		return errors.New("awg: tunnel is already up")
 	}
 
-	tunDev, err := openTUN(tunFD, cfg.MTU)
+	// MTU интерфейса ставит платформа при создании дескриптора; cfg.MTU здесь
+	// нужен только для лога и размера пайпа до релея.
+	// openTUN владеет дескриптором с первой же строки, в том числе на своей ошибке.
+	tunDev, err := openTUN(tunFD)
 	if err != nil {
 		return err
 	}
