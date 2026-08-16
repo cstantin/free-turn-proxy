@@ -8,7 +8,7 @@ import (
 	"github.com/xtaci/smux"
 )
 
-// Profile - настраиваемые KCP-параметры. Обе стороны туннеля должны совпадать.
+// Profile задаёт параметры настройки KCP.
 type Profile struct {
 	NoDelay    int
 	Interval   int
@@ -20,13 +20,13 @@ type Profile struct {
 	ACKNoDelay bool
 }
 
-// FEC управляет шардами KCP forward-error-correction. Нулевые значения отключают FEC.
+// FEC задаёт параметры Forward Error Correction (Data/Parity шарды).
 type FEC struct {
 	Data   int
 	Parity int
 }
 
-// DefaultProfile - исторический balanced-профиль, поставляемый с прокси.
+// DefaultProfile возвращает сбалансированный профиль KCP по умолчанию.
 func DefaultProfile() Profile {
 	return Profile{
 		NoDelay:    1,
@@ -40,8 +40,7 @@ func DefaultProfile() Profile {
 	}
 }
 
-// DtlsPacketConn оборачивает net.Conn (DTLS) как net.PacketConn для KCP.
-// Каждый DTLS Read/Write сохраняет границы сообщений (datagram семантика).
+// DtlsPacketConn адаптирует net.Conn (DTLS) к интерфейсу net.PacketConn для KCP.
 type DtlsPacketConn struct {
 	conn net.Conn
 }
@@ -80,11 +79,10 @@ func (d *DtlsPacketConn) SetWriteDeadline(t time.Time) error {
 }
 
 // NewKCPOverDTLS создаёт KCP-сессию поверх DTLS-соединения.
-// isServer: true - серверная сторона (listener), false - клиентская (dialer).
 func NewKCPOverDTLS(dtlsConn net.Conn, isServer bool, profile Profile, fec FEC) (*kcp.UDPSession, error) {
 	pc := NewDtlsPacketConn(dtlsConn)
 
-	block, err := kcp.NewNoneBlockCrypt(nil) // DTLS уже шифрует
+	block, err := kcp.NewNoneBlockCrypt(nil)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +119,7 @@ func NewKCPOverDTLS(dtlsConn net.Conn, isServer bool, profile Profile, fec FEC) 
 	return sess, nil
 }
 
-// DefaultSmuxConfig возвращает smux-конфигурацию, настроенную под TURN-туннель.
+// DefaultSmuxConfig возвращает конфигурацию smux для туннелирования поверх TURN.
 func DefaultSmuxConfig() *smux.Config {
 	cfg := smux.DefaultConfig()
 	cfg.MaxReceiveBuffer = 4 * 1024 * 1024

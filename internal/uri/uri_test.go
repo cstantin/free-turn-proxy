@@ -89,7 +89,7 @@ func TestParseErrors(t *testing.T) {
 		{"bad scheme", "http://vk"},
 		{"empty payload", "freeturn://"},
 		{"bad base64", "freeturn://!!!notbase64!!!"},
-		{"bad json", "freeturn://Zm9vYmFy"}, // base64("foobar")
+		{"bad json", "freeturn://Zm9vYmFy"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

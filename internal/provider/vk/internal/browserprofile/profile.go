@@ -26,8 +26,7 @@ const (
 	Mobile  Platform = "mobile"
 )
 
-// PlatformFromString мапит строку флага -platform в Platform. Пустое/неизвестное -
-// Desktop.
+// PlatformFromString преобразует строку в Platform (по умолчанию Desktop).
 func PlatformFromString(s string) Platform {
 	if s == string(Mobile) {
 		return Mobile
@@ -35,11 +34,7 @@ func PlatformFromString(s string) Platform {
 	return Desktop
 }
 
-// Profile - самосогласованная браузерная личность: единственный источник UA,
-// client hints, device-fingerprint, порядка заголовков и набора JS-возможностей
-// для VK control-plane и captcha. Строится один раз из Platform и Identity; не
-// мутируется в рантайме. Семейство всегда Chrome: только Chromium даёт NetworkInformation и
-// Generic Sensors, без которых телеметрия captcha неполна.
+// Profile содержит браузерные параметры и отпечатки (UA, client hints, device fingerprint).
 type Profile struct {
 	Platform        Platform
 	UserAgent       string
@@ -47,14 +42,9 @@ type Profile struct {
 	SecChUaMobile   string
 	SecChUaPlatform string
 	AcceptLanguage  string
-	// DeviceJSON - navigator/screen fingerprint для captcha componentDone.
-	DeviceJSON string
-	// VisitorID - идентификатор FingerprintJS этой личности.
-	VisitorID string
+	DeviceJSON      string
+	VisitorID       string
 
-	// Возможности JS, которые captcha спрашивает и вне device: значения те же,
-	// что уехали в DeviceJSON, второго источника быть не должно. Скаляры, а не
-	// device: Profile обязан оставаться сравнимым.
 	cores     int
 	memGB     int
 	webdriver bool
@@ -66,7 +56,6 @@ func (p Profile) HardwareConcurrency() int { return p.cores }
 
 func (p Profile) Webdriver() bool { return p.webdriver }
 
-// DeviceMemory возвращает nil там, где браузер не отдаёт navigator.deviceMemory.
 func (p Profile) DeviceMemory() *int {
 	if p.memGB == 0 {
 		return nil
@@ -74,9 +63,6 @@ func (p Profile) DeviceMemory() *int {
 	return &p.memGB
 }
 
-// device - то, что виджет captcha собирает из navigator/screen. Порядок полей
-// повторяет порядок ключей в объекте виджета, отсутствующие в браузере поля
-// выпадают из JSON так же, как undefined выпадает у JSON.stringify.
 type device struct {
 	ScreenWidth             int      `json:"screenWidth"`
 	ScreenHeight            int      `json:"screenHeight"`
@@ -91,14 +77,9 @@ type device struct {
 	HardwareConcurrency     int      `json:"hardwareConcurrency"`
 	DeviceMemory            *int     `json:"deviceMemory,omitempty"`
 	ConnectionEffectiveType string   `json:"connectionEffectiveType,omitempty"`
-	// NotificationsPermission - состояние permissions.query({name:"notifications"}).
-	// Дефолт живого браузера - prompt; denied означало бы явный отказ пользователя.
-	NotificationsPermission string `json:"notificationsPermission"`
+	NotificationsPermission string   `json:"notificationsPermission"`
 }
 
-// Порядок заголовков h2. Отсутствующие в запросе имена fhttp пропускает, поэтому
-// один список покрывает и навигацию (upgrade-insecure-requests, sec-fetch-user),
-// и fetch/XHR (origin, content-type).
 var chromeHeaderOrder = []string{
 	"content-length",
 	"sec-ch-ua-platform",
@@ -120,8 +101,6 @@ var chromeHeaderOrder = []string{
 	"priority",
 }
 
-// spec - варьируемая часть персоны: всё, чем реально различаются машины одной
-// платформы. Остальное (Chrome-версия, язык, порядок заголовков) общее.
 type spec struct {
 	userAgent  string
 	chPlatform string
@@ -135,10 +114,7 @@ var desktopSpecs = []spec{
 	{userAgent: uaMac, chPlatform: `"macOS"`, dev: newDevice(1512, 982, 944, 1147, 870, 2, 10, 8)},
 }
 
-// Chrome морозит мобильный UA до "Android 10; K" на всех устройствах, поэтому
-// персоны различаются только железом.
 var mobileSpecs = []spec{
-	// Снято с живого устройства: innerWidth на 1 меньше screenWidth (округление при dpr 3.5).
 	{userAgent: uaAndroid, chPlatform: `"Android"`, dev: newDevice(364, 793, 793, 363, 671, 3.5, 8, 8)},
 	{userAgent: uaAndroid, chPlatform: `"Android"`, dev: newDevice(393, 852, 852, 393, 659, 3, 8, 8)},
 	{userAgent: uaAndroid, chPlatform: `"Android"`, dev: newDevice(412, 915, 915, 412, 724, 2.625, 8, 4)},
@@ -146,19 +122,15 @@ var mobileSpecs = []spec{
 	{userAgent: uaAndroid, chPlatform: `"Android"`, dev: newDevice(384, 832, 832, 384, 644, 2.75, 8, 8)},
 }
 
-// Identity - семя личности: одна и та же Identity всегда даёт один и тот же
-// Profile, включая VisitorID.
+// Identity идентифицирует браузерную личность и её поколение.
 type Identity struct {
-	// Seed - стабильная строка установки: личность переживает перезапуск.
 	Seed string
-	// Gen растёт при сжигании персоны: отвергнутый отпечаток не переиспользуется
-	// до конца процесса, но между запусками возвращается.
-	Gen int
+	Gen  int
 }
 
 func (id Identity) String() string { return id.Seed + "|" + strconv.Itoa(id.Gen) }
 
-// For строит персону для platform и identity. Неизвестная platform -> Desktop.
+// For генерирует профиль браузера для указанной платформы и идентичности.
 func For(p Platform, id Identity) Profile {
 	specs := desktopSpecs
 	if p == Mobile {
@@ -187,7 +159,6 @@ func For(p Platform, id Identity) Profile {
 	return profile
 }
 
-// newDevice дополняет варьируемые поля общими для всех персон.
 func newDevice(screenW, screenH, availH, innerW, innerH int, dpr float64, cores, memGB int) device {
 	memory := memGB
 	return device{
@@ -222,9 +193,6 @@ func withDevice(p Profile, d device) Profile {
 	return p
 }
 
-// ClientProfile - TLS/HTTP2-отпечаток персоны (JA3 + ALPN + h2 settings + порядок
-// псевдозаголовков). Chrome использует один TLS-стек на всех платформах, поэтому
-// platform на него не влияет.
 func (Profile) ClientProfile() profiles.ClientProfile {
 	return profiles.Chrome_146
 }
@@ -235,7 +203,6 @@ func ApplyFhttp(req *fhttp.Request, profile Profile) {
 	req.Header.Set("sec-ch-ua-mobile", profile.SecChUaMobile)
 	req.Header.Set("sec-ch-ua-platform", profile.SecChUaPlatform)
 	req.Header.Set("Accept-Language", profile.AcceptLanguage)
-	// Навигация документа идёт с нулевым приоритетом, u=1 - профиль fetch/XHR.
 	if req.Header.Get("Sec-Fetch-Dest") == "document" {
 		req.Header.Set("Priority", "u=0, i")
 	} else {

@@ -1,9 +1,4 @@
-// Package wgconf разбирает конфиг в формате wg-quick (в том числе с
-// расширениями AmneziaWG) в tunnel.Config.
-//
-// Хост передаёт текст конфига как есть - тем, который пользователь получил от
-// сервера. Разбор и проверка живут здесь, чтобы приложение не резало строки
-// регулярками и не знало формат.
+// Package wgconf выполняет парсинг конфигурации формата wg-quick в tunnel.Config.
 package wgconf
 
 import (
@@ -16,9 +11,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/tunnel"
 )
 
-// Ключи wg-quick, которые userspace-туннелю не нужны: маршруты, правила
-// файрвола и скрипты применяет платформа, а не мы. Встретив их, парсер молчит;
-// на всём остальном незнакомом - ругается, чтобы опечатка не потерялась.
+// ignoredKeys содержит ключи wg-quick, управляемые внешней платформой/ОС.
 var ignoredKeys = map[string]bool{
 	"table":       true,
 	"fwmark":      true,
@@ -31,7 +24,7 @@ var ignoredKeys = map[string]bool{
 	"description": true,
 }
 
-// Возвращает провалидированный tunnel.Config из wg-quick текста.
+// Parse разбирает и валидирует текст конфигурации wg-quick.
 func Parse(text string) (*tunnel.Config, error) {
 	cfg := tunnel.Defaults()
 
@@ -206,8 +199,7 @@ func parseKey(value string) (tunnel.Key, error) {
 	return k, nil
 }
 
-// parsePrefixes принимает список через запятую. Голый адрес без маски
-// достраивается до /32 или /128: клиенты пишут и так, и так.
+// parsePrefixes разбирает список IP/CIDR (голый IP преобразуется в /32 или /128).
 func parsePrefixes(value string) ([]netip.Prefix, error) {
 	var out []netip.Prefix
 	for _, item := range strings.Split(value, ",") {
@@ -228,8 +220,7 @@ func parsePrefixes(value string) ([]netip.Prefix, error) {
 	return out, nil
 }
 
-// parseDNS берёт только адреса: wg-quick разрешает в этой же строке search
-// domains, но userspace-туннелю они не нужны.
+// parseDNS извлекает только IP-адреса DNS, игнорируя search domains.
 func parseDNS(value string) []netip.Addr {
 	var out []netip.Addr
 	for _, item := range strings.Split(value, ",") {

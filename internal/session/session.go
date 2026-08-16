@@ -1,14 +1,4 @@
-// Package session - рантайм одной клиентской сессии: провайдер TURN-реквизитов,
-// DNS, DTLS-диалеры и выбранный режим релея (udprelay / tcpfwd).
-//
-// Общий для cmd/client, пакета mobile и любого будущего потребителя: хост даёт
-// конфиг, логгер и контекст, а взамен получает блокирующий Run и Snapshot для
-// UI. Пакет не знает ни про CLI, ни про gomobile - ничего из os.Exit, флагов и
-// платформенных типов здесь быть не должно.
-//
-// Одна активная сессия на процесс: dnsdial.InstallGlobalResolver и
-// netctl.SetControl - process-global, две параллельные сессии затирали бы
-// настройки друг друга.
+// Package session управляет жизненным циклом клиентской сессии и релея трафика.
 package session
 
 import (
@@ -34,24 +24,20 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/wake"
 )
 
-// Phase - стадия подключения сессии.
+// Phase - текущая стадия подключения сессии.
 type Phase string
 
 const (
 	PhaseIdle       Phase = "idle"
 	PhaseConnecting Phase = "connecting"
 	PhaseConnected  Phase = "connected"
-	// PhaseCaptcha - пользователь решает captcha вручную. Отдельная стадия,
-	// чтобы UI не показывал ошибку, а watchdog не считал это зависанием.
+	// PhaseCaptcha - ожидание ручного ввода captcha пользователем.
 	PhaseCaptcha Phase = "captcha"
-	// PhaseError выставляет хост по ошибке из Run: сама сессия к этому моменту
-	// уже завершена.
-	PhaseError Phase = "error"
+	PhaseError   Phase = "error"
 )
 
 var (
-	ErrAlreadyRun = errors.New("session: already run")
-	// ErrConnectTimeout - ни один поток не поднялся за ConnectTimeout.
+	ErrAlreadyRun     = errors.New("session: already run")
 	ErrConnectTimeout = errors.New("session: connect timeout: no stream connected within the deadline")
 )
 
@@ -62,20 +48,11 @@ const (
 	defaultTCPHandshakeTimeout  = 30 * time.Second
 	defaultHandshakeConcurrency = 3
 
-	// Детектор сна: тик частый (дёшев), порог с запасом от джиттера таймера, но
-	// сильно меньше 10-минутного времени жизни TURN-аллокации.
 	wakeTick      = 5 * time.Second
 	wakeThreshold = 60 * time.Second
 )
 
-// Options - тайминги и переключатели рантайма. Нулевое значение поля означает
-// "дефолт пакета"; ConnectTimeout=0 - особый случай, см. поле.
 type Options struct {
-	// ConnectTimeout ограничивает ожидание первого поднявшегося стрима: если за
-	// это время ни один не поднялся, Run возвращает ошибку вместо вечного
-	// connecting. Падение отдельного стрима не считается - таймаут снимается,
-	// пока жив хотя бы один. 0 отключает watchdog (поведение CLI: клиент ждёт
-	// столько, сколько попросили).
 	ConnectTimeout time.Duration
 
 	StatusInterval       time.Duration
@@ -84,8 +61,6 @@ type Options struct {
 	TCPHandshakeTimeout  time.Duration
 	HandshakeConcurrency int
 
-	// Traffic включает подсчёт байт и скорости. Нужен UI; CLI без него не
-	// платит за атомики на пути пакета.
 	Traffic bool
 }
 
@@ -108,27 +83,17 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
-// Deps - зависимости хоста. Всё, кроме Logger, опционально.
 type Deps struct {
-	Logger logx.Logger
-	// Observer получает переходы состояния. nil - хост опрашивает Snapshot.
-	Observer Observer
-	// Solver - ручной решатель captcha. nil отключает ручной fallback.
-	Solver vk.ManualSolverFunc
-	// CaptchaActive сообщает, что прямо сейчас идёт ручное решение captcha:
-	// на это время watchdog приостанавливает отсчёт ConnectTimeout, а Snapshot
-	// отдаёт PhaseCaptcha. nil - captcha никогда не активна.
+	Logger        logx.Logger
+	Observer      Observer
+	Solver        vk.ManualSolverFunc
 	CaptchaActive func() bool
-	// LocalPipe подменяет локальный UDP-сокет каналом в памяти: так туннель,
-	// поднятый внутри процесса, соединяется с релеем напрямую. nil - обычный
-	// bind на cfg.Proxy.Listen. Только для udp-режима; сессия закрывает его сама.
+	// LocalPipe подменяет локальный UDP-сокет прямым каналом в памяти (только udp).
 	LocalPipe net.PacketConn
 	Options   Options
 }
 
-// Snapshot - консистентный срез состояния сессии для UI: и стадия подключения,
-// и статистика трафика. Один вызов на тик вместо нескольких геттеров - хост не
-// ловит рассогласование от порядка чтения.
+// Snapshot - моментальный снимок состояния сессии для UI.
 type Snapshot struct {
 	Phase   Phase
 	Streams int
@@ -147,8 +112,7 @@ type statusInfo struct {
 	err     string
 }
 
-// Session - одна клиентская сессия. Создаётся New, отрабатывает один Run,
-// повторно не используется.
+// Session инкапсулирует состояние и управление клиентской сессией.
 type Session struct {
 	cfg     *config.Client
 	deps    Deps
@@ -162,7 +126,6 @@ type Session struct {
 	wake      *wake.Notifier
 }
 
-// Сеть не трогает: блокирующие вызовы происходят в Run.
 func New(cfg *config.Client, deps Deps) (*Session, error) {
 	if cfg == nil {
 		return nil, errors.New("session: nil config")
@@ -171,8 +134,6 @@ func New(cfg *config.Client, deps Deps) (*Session, error) {
 		deps.Logger = logx.Nop()
 	}
 
-	// Несколько ссылок расширяют пул: каждая даёт cfg.TURN.N стримов, все
-	// объединяются в общий пул (больше параллельных TURN-аллокаций).
 	total := cfg.TURN.N * max(len(cfg.VK.Links), 1)
 
 	s := &Session{
@@ -185,20 +146,15 @@ func New(cfg *config.Client, deps Deps) (*Session, error) {
 	if s.opts.Traffic {
 		s.traffic = newTraffic()
 	}
-	// Созданная сессия уже "подключается": хост читает Snapshot сразу после New,
-	// и показывать ему idle до первой строки Run было бы враньём. Кладётся
-	// молча - наблюдателя на этот момент ещё нет, первое событие даст Run.
 	s.status.Store(&statusInfo{phase: PhaseConnecting, total: total})
 	return s, nil
 }
 
-// Блокирует до отмены ctx (возвращает nil) или фатальной ошибки.
+// Run запускает сессию и блокирует вызывающую горутину до завершения или ошибки.
 func (s *Session) Run(ctx context.Context) (err error) {
 	if !s.started.CompareAndSwap(false, true) {
 		return ErrAlreadyRun
 	}
-	// Первое событие сессии приходит всегда, даже если состояние совпало с
-	// заготовленным в New: для наблюдателя это начало жизни, а не повтор.
 	s.publish(&statusInfo{phase: PhaseConnecting, total: s.total}, true)
 	defer func() {
 		if err != nil {
@@ -259,8 +215,6 @@ func (s *Session) Run(ctx context.Context) (err error) {
 	}()
 
 	relayErr := s.relay(runCtx, prov, peer)
-	// Причину смотрим до cancel: собственный defer сделал бы любой выход
-	// "отменённым" и проглотил бы настоящую ошибку релея.
 	stopped := runCtx.Err() != nil
 	cancel()
 	bg.Wait()
@@ -268,16 +222,13 @@ func (s *Session) Run(ctx context.Context) (err error) {
 	if relayErr != nil && !stopped {
 		return relayErr
 	}
-	// Watchdog отменяет контекст сам, поэтому его ошибка приходит именно так.
 	return watchdogErr
 }
 
-// Wake - хост знает про пробуждение раньше собственного детектора (SCREEN_ON,
-// возврат приложения на передний план): стримы бросают backoff и пересоздают
-// TURN-аллокации немедленно. Безопасен из любой горутины и до Run.
+// Wake инициирует немедленное переподключение TURN-аллокаций после пробуждения.
 func (s *Session) Wake() { s.wake.Fire() }
 
-// Snapshot - текущее состояние сессии. Безопасен из любой горутины.
+// Snapshot возвращает текущий снимок состояния сессии.
 func (s *Session) Snapshot() Snapshot {
 	st := s.status.Load()
 	if st == nil {
@@ -292,16 +243,10 @@ func (s *Session) Snapshot() Snapshot {
 	return snap
 }
 
-// setStatus публикует состояние и, если оно изменилось, дёргает Observer.
 func (s *Session) setStatus(phase Phase, streams int, errMsg string) {
 	s.publish(&statusInfo{phase: phase, streams: streams, total: s.total, err: errMsg}, false)
 }
 
-// publish кладёт состояние и уведомляет наблюдателя. force шлёт событие даже
-// при совпадении с предыдущим.
-//
-// Вызывается из одной горутины за раз: старт и терминальный статус - из Run,
-// промежуточные - из watch, который к моменту терминального уже завершён.
 func (s *Session) publish(next *statusInfo, force bool) {
 	prev := s.status.Swap(next)
 	if !force && prev != nil && *prev == *next {
@@ -316,8 +261,7 @@ func (s *Session) captchaActive() bool {
 	return s.deps.CaptchaActive != nil && s.deps.CaptchaActive()
 }
 
-// watch публикует стадию подключения и следит за ConnectTimeout. При срабатывании
-// отменяет сессию через cancel и возвращает ошибку - её Run отдаёт наружу.
+// watch публикует стадию подключения и следит за ConnectTimeout.
 func (s *Session) watch(ctx context.Context, cancel context.CancelFunc) error {
 	tick := time.NewTicker(s.opts.StatusInterval)
 	defer tick.Stop()
@@ -365,8 +309,7 @@ func (s *Session) relay(ctx context.Context, prov provider.Provider, peer *net.U
 		return c.User, c.Pass, c.ServerAddrs, nil
 	}
 
-	// Управление маршрутами: создаём host-route для IP TURN-серверов через
-	// реальный шлюз, чтобы VPN не перехватывал TURN-трафик.
+	// host-route для IP TURN-серверов в обход VPN-туннеля.
 	var routeCallback func(net.IP)
 	if s.cfg.Routes && !s.cfg.Tunnel.Enabled() {
 		rm, rmErr := routemgr.New(log)
@@ -432,9 +375,6 @@ func (s *Session) relay(ctx context.Context, prov provider.Provider, peer *net.U
 	return udprelay.Run(ctx, dialer, prov, log, &s.connected, routeCallback, s.wake, params, peer, local, s.total)
 }
 
-// localConn открывает канал до локального пира. Обычно это UDP-сокет на
-// cfg.Proxy.Listen, куда ходит внешний WireGuard. Если хост дал LocalPipe -
-// туннель живёт в этом же процессе, и петля через 127.0.0.1 не нужна.
 func (s *Session) localConn(ctx context.Context) (net.PacketConn, error) {
 	if s.deps.LocalPipe != nil {
 		s.deps.Logger.Infof("local peer: in-process pipe (no loopback socket)")

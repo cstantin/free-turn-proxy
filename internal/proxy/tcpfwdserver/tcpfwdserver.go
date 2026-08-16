@@ -1,7 +1,4 @@
-// Package tcpfwdserver реализует серверную VLESS lane: KCP+smux поверх
-// DTLS-соединения, каждый smux-поток форвардится как TCP-соединение к backend
-// (Xray/VLESS). Bond-потоки автоопределяются по magic-префиксу и диспетчеризуются
-// в bondserver.Registry.
+// Package tcpfwdserver реализует серверную часть KCP+smux поверх DTLS с форвардингом в TCP backend.
 package tcpfwdserver
 
 import (
@@ -19,9 +16,7 @@ import (
 	"github.com/xtaci/smux"
 )
 
-// Handle оборачивает dtlsConn в KCP+smux и форвардит каждый принятый поток как
-// TCP-соединение к connectAddr. Потоки, чьи первые 4 байта совпадают с bond magic,
-// передаются в registry.
+// Handle принимает DTLS-соединение, инициализирует KCP+smux и пересылает входящие потоки в connectAddr.
 func Handle(ctx context.Context, logger logx.Logger, registry *bondserver.Registry, dtlsConn net.Conn, connectAddr string, kcpProfile kcptun.Profile, kcpFEC kcptun.FEC) {
 	kcpSess, err := kcptun.NewKCPOverDTLS(dtlsConn, true, kcpProfile, kcpFEC)
 	if err != nil {
@@ -102,8 +97,7 @@ func handleStream(ctx context.Context, logger logx.Logger, registry *bondserver.
 	netconn.BiCopy(ctx, &prefixedConn{Conn: s, prefix: prefix[:]}, backendConn, logger.Debugf)
 }
 
-// prefixedConn повторно вставляет magic-peek prefix при первых чтениях,
-// чтобы backend видел полный оригинальный поток байт.
+// prefixedConn восстанавливает прочитанный префикс в поток байт.
 type prefixedConn struct {
 	net.Conn
 	prefix []byte

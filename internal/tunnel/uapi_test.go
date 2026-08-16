@@ -45,8 +45,6 @@ func TestUAPIVanillaWireGuard(t *testing.T) {
 	}
 }
 
-// Ключевое свойство: без параметров маскировки в поток не уходит ни один
-// awg-ключ, поэтому mode=wg побитово совпадает с обычным WireGuard.
 func TestUAPIOmitsAmneziaWhenDisabled(t *testing.T) {
 	got, err := UAPI(minimalConfig())
 	if err != nil {
@@ -83,7 +81,6 @@ func TestUAPIAmneziaParams(t *testing.T) {
 			t.Errorf("UAPI() missing %q:\n%s", want, got)
 		}
 	}
-	// Нулевые padding'и не печатаются: устройство отвергает неположительные.
 	for _, unwanted := range []string{"s3=", "s4=", "i2=", "i3=", "i4="} {
 		if strings.Contains(got, unwanted) {
 			t.Errorf("UAPI() contains %q for zero value:\n%s", unwanted, got)

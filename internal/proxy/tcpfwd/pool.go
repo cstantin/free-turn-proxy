@@ -13,9 +13,8 @@ import (
 	"github.com/xtaci/smux"
 )
 
-// PooledSession - одна TURN+DTLS+KCP+smux сессия в пуле с lifetime-счётчиками.
-// Поля экспортированы для учёта per-lane трафика в bondclient;
-// атомики изменять только через их методы.
+// PooledSession - одна TURN+DTLS+KCP+smux сессия. Поля экспортированы для
+// per-lane трафика в bondclient; атомики изменять только через их методы.
 type PooledSession struct {
 	ID          int
 	Sess        *smux.Session
@@ -33,8 +32,7 @@ type SessionPool struct {
 	counter     atomic.Uint64
 	connCounter atomic.Uint64
 
-	// active - зеркало числа живых сессий для наблюдателей вне пакета
-	// (watchdog и счётчик стримов в UI). nil, если хост его не просил.
+	// active - зеркало числа живых сессий для watchdog/UI. nil, если не просили.
 	active *atomic.Int32
 
 	readyOnce sync.Once
@@ -48,7 +46,6 @@ func (p *SessionPool) publishActive() {
 	}
 }
 
-// Ready возвращает канал, закрытый при первом появлении сессии в пуле.
 func (p *SessionPool) Ready() <-chan struct{} {
 	p.mu.Lock()
 	if p.ready == nil {
@@ -59,7 +56,6 @@ func (p *SessionPool) Ready() <-chan struct{} {
 	return ch
 }
 
-// Add регистрирует только что подключённую сессию в пуле.
 func (p *SessionPool) Add(id int, s *smux.Session) *PooledSession {
 	ps := &PooledSession{ID: id, Sess: s}
 	p.mu.Lock()
@@ -74,7 +70,7 @@ func (p *SessionPool) Add(id int, s *smux.Session) *PooledSession {
 	return ps
 }
 
-// Remove удаляет ps из пула. No-op если не найден.
+// Remove no-op если ps не найден.
 func (p *SessionPool) Remove(ps *PooledSession) {
 	p.mu.Lock()
 	for i, sess := range p.sessions {
@@ -87,7 +83,7 @@ func (p *SessionPool) Remove(ps *PooledSession) {
 	p.mu.Unlock()
 }
 
-// Pick возвращает следующую сессию в round-robin порядке или nil если пул пуст.
+// Pick - nil если пул пуст.
 func (p *SessionPool) Pick() *PooledSession {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -99,12 +95,11 @@ func (p *SessionPool) Pick() *PooledSession {
 	return p.sessions[idx]
 }
 
-// NextConnID возвращает монотонно возрастающий идентификатор соединения.
 func (p *SessionPool) NextConnID() uint64 {
 	return p.connCounter.Add(1)
 }
 
-// Snapshot возвращает копию всех активных (незакрытых) сессий.
+// Snapshot - копия незакрытых сессий.
 func (p *SessionPool) Snapshot() []*PooledSession {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -117,8 +112,7 @@ func (p *SessionPool) Snapshot() []*PooledSession {
 	return out
 }
 
-// Count возвращает число сессий в пуле (включая только что закрытые;
-// используй Snapshot для live-only).
+// Count включает только что закрытые сессии; для live-only используй Snapshot.
 func (p *SessionPool) Count() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

@@ -91,7 +91,6 @@ func TestApplyURIOverridesOnlyPresentFields(t *testing.T) {
 	if r.Transport != TransportUDP || r.Mode != ModeTCP || !r.Bond || r.N != 7 {
 		t.Errorf("URI fields not applied: %+v", r)
 	}
-	// URI не несёт ссылок и client-id - значения источника обязаны уцелеть.
 	if r.ClientID != "flag-id" || r.Links != "https://vk.ru/call/join/FROMFLAG" {
 		t.Errorf("URI wiped fields it does not carry: %+v", r)
 	}

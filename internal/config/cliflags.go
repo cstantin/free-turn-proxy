@@ -13,10 +13,7 @@ import (
 
 const uriScheme = "freeturn://"
 
-// PeekSubURL вытаскивает значение -sub из сырых args без полного парсинга.
-// Нужен до ParseClient: подписка отдаёт peer, без которого валидация падает.
-// Вызывающий тянет подписку и подсовывает URI ноды позиционным аргументом -
-// дальше применение идёт общим путём в ParseClient.
+// PeekSubURL извлекает значение флага -sub из сырых аргументов без полного парсинга.
 func PeekSubURL(args []string) string {
 	for i := range args {
 		a := args[i]
@@ -33,8 +30,7 @@ func PeekSubURL(args []string) string {
 	return ""
 }
 
-// ParseClient разбирает args (без имени программы) в Client.
-// При flag.ErrHelp возвращает (nil, flag.ErrHelp) - вызывающий выходит штатно.
+// ParseClient парсит аргументы командной строки в Client.
 func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	r := defaultRaw()
 
@@ -92,10 +88,7 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	return c, nil
 }
 
-// ParseServer разбирает args (без имени программы) в Server.
-//
-// Без промежуточного raw, в отличие от клиента: у сервера единственный источник
-// конфига - командная строка, разделять источник и сборку нечего.
+// ParseServer парсит аргументы командной строки в Server.
 func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 	def := ServerDefaults()
 
@@ -142,7 +135,6 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 		ClientsFile: *clientsFile,
 	}
 
-	// -gen-obf-key печатает новый ключ и выходит: остальной конфиг не нужен.
 	if s.Obf.GenKey {
 		return s, nil
 	}

@@ -5,8 +5,7 @@ import (
 	neturl "net/url"
 )
 
-// Error описывает ошибку VK API "captcha required" (error_code 14) и поля,
-// необходимые для решения challenge.
+// Error описывает ошибку VK API "captcha required" (error_code 14).
 type Error struct {
 	ErrorCode               int
 	ErrorMsg                string
@@ -18,8 +17,7 @@ type Error struct {
 	CaptchaAttempt          string
 }
 
-// ParseError извлекает captcha-challenge из payload ошибки VK API.
-// Возвращает nil, если обязательные поля отсутствуют.
+// ParseError извлекает параметры капчи из ответа об ошибке VK API.
 func ParseError(errData map[string]any) *Error {
 	codeFloat, ok := errData["error_code"].(float64)
 	if !ok {
@@ -93,8 +91,7 @@ func ParseError(errData map[string]any) *Error {
 	}
 }
 
-// IsCaptcha сообщает, является ли это actionable captcha-challenge
-// (error_code 14 с непустыми redirect_uri и session_token).
+// IsCaptcha проверяет, является ли ошибка actionable captcha-challenge (код 14).
 func (e *Error) IsCaptcha() bool {
 	return e.ErrorCode == 14 && e.RedirectURI != "" && e.SessionToken != ""
 }

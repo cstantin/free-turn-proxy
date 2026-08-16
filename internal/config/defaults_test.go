@@ -28,8 +28,7 @@ func TestDefaultsAssemble(t *testing.T) {
 	}
 }
 
-// Дефолты флагов и Defaults() обязаны совпадать: расхождение означает, что
-// литерал где-то продублирован в обход defaults.go.
+// Проверка совпадения дефолтов флагов и структуры Defaults().
 func TestFlagDefaultsMatchDefaults(t *testing.T) {
 	parsed, err := ParseClient(validClientArgs(), io.Discard)
 	if err != nil {

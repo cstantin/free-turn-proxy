@@ -19,7 +19,6 @@ func TestFireWakesAllListeners(t *testing.T) {
 	}
 }
 
-// Канал одноразовый: взятый после Fire ждёт следующего.
 func TestChanIsRenewedAfterFire(t *testing.T) {
 	n := New()
 	n.Fire()
@@ -39,7 +38,6 @@ func TestChanIsRenewedAfterFire(t *testing.T) {
 	}
 }
 
-// Нулевой Notifier даёт nil-канал: вызывающему не нужен случай "сигнала нет".
 func TestNilNotifierBlocksForever(t *testing.T) {
 	var n *Notifier
 	n.Fire()

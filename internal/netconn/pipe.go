@@ -8,10 +8,7 @@ import (
 	"time"
 )
 
-// BiCopy запускает io.Copy в обе стороны между c1 и c2; возвращает
-// (bytesC1FromC2, bytesC2FromC1). Как только одна копия завершилась
-// (EOF/ошибка/cancel) - обоим концам выставляется deadline=time.Now(),
-// чтобы разблокировать парную горутину. Ошибки уходят в errf, если он не nil.
+// BiCopy выполняет двунаправленное копирование между c1 и c2 с закрытием по первому завершению.
 func BiCopy(ctx context.Context, c1, c2 net.Conn, errf func(format string, v ...any)) (int64, int64) {
 	ctx2, cancel := context.WithCancel(ctx)
 	context.AfterFunc(ctx2, func() {

@@ -11,12 +11,6 @@ import (
 // CredsStateFile - имя файла с кэшем TURN-реквизитов рядом с vk_persona.json.
 const CredsStateFile = "vk_turn_creds.json"
 
-// credsEntry - реквизиты одного блока стримов. Живут 10 минут, а перезапуск
-// процесса (sticky-рестарт на Android) укладывается в секунды: без файла он
-// платил бы полную VK-цепочку с риском captcha за уже выданные креды.
-//
-// ExpiresAt в стенных часах: монотонные на Android стоят во время сна, и после
-// пробуждения протухшее считалось бы свежим.
 type credsEntry struct {
 	Link        string   `json:"link"`
 	CacheID     int      `json:"cacheId"`
@@ -30,25 +24,18 @@ type credsState struct {
 	Entries []credsEntry `json:"entries"`
 }
 
-// credsStore с пустым paths - no-op (тесты и хосты без записи на диск).
 type credsStore struct {
 	paths []string
 }
 
-// Файл делят все vk.Provider процесса (multi-link), а запись идёт read-modify-write.
-//
-//nolint:gochecknoglobals // состояние на процесс, процессного лока хватает
+//nolint:gochecknoglobals
 var credsMu sync.Mutex
 
-// credsKey - одна запись кэша: свой блок стримов на каждую (ссылка, cacheID).
 type credsKey struct {
 	link    string
 	cacheID int
 }
 
-// read сливает все читаемые пути, оставляя на ключ самую позднюю запись: писать
-// WriteFirst может не в тот файл, из которого читается (каталог бинаря бывает
-// read-only, а не пустой), и тогда кэш не сработал бы ни разу.
 func (s credsStore) read() []credsEntry {
 	var out []credsEntry
 	seen := map[credsKey]int{}
@@ -73,9 +60,6 @@ func (s credsStore) read() []credsEntry {
 	return out
 }
 
-// keep отбирает записи на сохранение: без своей (link, cacheID) - её заменяет
-// вызывающий - и без протухших, чтобы файл не рос от смены ссылок и не держал
-// мёртвые секреты дольше их TTL.
 func (s credsStore) keep(link string, cacheID int) []credsEntry {
 	now := time.Now().Unix()
 	var out []credsEntry
@@ -136,8 +120,6 @@ func (s credsStore) save(cacheID int, c TurnCredentials) bool {
 	}))
 }
 
-// drop зовётся, когда TURN отверг реквизиты: иначе перезапуск поднял бы с диска
-// то, что только что не сработало.
 func (s credsStore) drop(link string, cacheID int) {
 	if len(s.paths) == 0 || link == "" {
 		return

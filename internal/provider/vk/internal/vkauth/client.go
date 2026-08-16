@@ -18,47 +18,19 @@ import (
 	tlsclient "github.com/bogdanfinn/tls-client"
 )
 
-// Config конфигурирует Client. Нулевые значения - безопасные дефолты,
-// кроме Dialer (должен быть задан явно для кастомного DNS).
 type Config struct {
-	// Credentials для перебора по порядку. nil/empty -> DefaultCredentials.
-	Credentials []VKCredentials
-
-	Dialer net.Dialer
-
-	// ManualOnly форсирует ручной путь captcha с первой попытки.
-	ManualOnly bool
-
-	// StreamsPerCache - делитель streamID -> cacheID. <=0 -> дефолт.
+	Credentials     []VKCredentials
+	Dialer          net.Dialer
+	ManualOnly      bool
 	StreamsPerCache int
-
-	// StreamsAlive возвращает число подключённых потоков; используется для
-	// решения, является ли исчерпанная captcha фатальной или только throttle.
-	// nil -> 1.
-	StreamsAlive func() int32
-
-	// AutoSolver / ManualSolver - подключаемые решалки captcha. nil отключает
-	// соответствующий путь (поток переходит к следующей попытке).
-	AutoSolver   AutoSolveFunc
-	ManualSolver ManualSolveFunc
-
-	// Platform - класс устройства персоны (desktop|mobile). Нулевое -> desktop.
-	Platform browserprofile.Platform
-
-	// FingerprintSeed - стабильная строка установки, из которой выводится
-	// личность персоны. Пустая -> случайная на запуск.
+	StreamsAlive    func() int32
+	AutoSolver      AutoSolveFunc
+	ManualSolver    ManualSolveFunc
+	Platform        browserprofile.Platform
 	FingerprintSeed string
-
-	// StatePaths - кандидаты файла с поколением персоны (первый доступный на
-	// запись). Пустые -> поколение живёт только в памяти процесса.
-	StatePaths []string
-
-	// CredsPaths - кандидаты файла с кэшем TURN-реквизитов. Пустые -> кэш живёт
-	// только в памяти, и перезапуск процесса всегда платит VK-цепочку заново.
-	CredsPaths []string
-
-	// Log - уровневый логгер. nil -> no-op.
-	Log logx.Logger
+	StatePaths      []string
+	CredsPaths      []string
+	Log             logx.Logger
 }
 
 type Client struct {
@@ -81,17 +53,10 @@ type Client struct {
 	persona   browserprofile.Profile
 	gens      genStore
 
-	fetchMu       sync.Mutex
-	lastFetchTime time.Time
-	// captchaAttempt считает попытки решения captcha в рамках одного fetch, в том
-	// числе через рестарт цепочки после сжигания персоны. Только под fetchMu.
-	captchaAttempt int
-
-	// tokenChain - 4-шаговый получатель токена для пары credentials.
-	// В prod подключён (*Client).getTokenChain; тесты подменяют fake.
-	tokenChain tokenChainFn
-
-	// minFetchIntervalFn ограничивает частоту запросов к VK. Тесты снижают.
+	fetchMu            sync.Mutex
+	lastFetchTime      time.Time
+	captchaAttempt     int
+	tokenChain         tokenChainFn
 	minFetchIntervalFn func() time.Duration
 }
 
@@ -125,7 +90,6 @@ func New(cfg Config) *Client {
 	}
 	seed := cfg.FingerprintSeed
 	if seed == "" {
-		// Пустой seed у всех установок дал бы им одну личность на всех.
 		seed = randx.Hex(16)
 	}
 	c.gens = genStore{paths: cfg.StatePaths}
@@ -143,9 +107,6 @@ func (c *Client) currentPersona() browserprofile.Profile {
 	return c.persona
 }
 
-// burnPersona выдаёт следующее поколение личности. Зовётся, когда VK отверг
-// текущий отпечаток: продолжать в нём бессмысленно, а менять его в середине
-// сессии - сам по себе сигнал, поэтому цепочка перезапускается с нуля.
 func (c *Client) burnPersona(streamID int) {
 	c.personaMu.Lock()
 	c.identity.Gen++
@@ -158,8 +119,7 @@ func (c *Client) burnPersona(streamID int) {
 	}
 }
 
-// GetCredentials -> (username, password, server-addrs); addrs ротированы под
-// streamID (предпочтительный первым, см. orderAddrs), fetch к VK только при промахе кэша.
+// GetCredentials возвращает учетные данные TURN, используя кеш или запрашивая их у VK.
 func (c *Client) GetCredentials(ctx context.Context, link string, streamID int) (string, string, []string, error) {
 	cache := c.store.Get(streamID)
 	cacheID := c.store.CacheID(streamID)
@@ -182,8 +142,6 @@ func (c *Client) GetCredentials(ctx context.Context, link string, streamID int) 
 		return cache.creds.Username, cache.creds.Password, orderAddrs(cache.creds.ServerAddrs, streamID), nil
 	}
 
-	// Кэш с прошлого запуска процесса: в окне до протухания вся VK-цепочка
-	// (4 шага, троттлинг, captcha) не нужна вовсе.
 	if restored, ok := c.creds.load(link, cacheID); ok {
 		cache.creds = restored
 		c.log.Infof("[STREAM %d] [VK Auth] Credentials restored from state (cache=%d, expires in %v)",
@@ -200,19 +158,13 @@ func (c *Client) GetCredentials(ctx context.Context, link string, streamID int) 
 		Username:    user,
 		Password:    pass,
 		ServerAddrs: addrs,
-		// Round(0) снимает монотонную компоненту: она не идёт во время сна
-		// устройства, и через полчаса suspend'а протухшее выглядело бы свежим.
-		ExpiresAt: time.Now().Add(CredentialLifetime - CacheSafetyMargin).Round(0),
-		Link:      link,
+		ExpiresAt:   time.Now().Add(CredentialLifetime - CacheSafetyMargin).Round(0),
+		Link:        link,
 	}
 	c.creds.save(cacheID, cache.creds)
 	return user, pass, orderAddrs(addrs, streamID), nil
 }
 
-// orderAddrs возвращает копию addrs, ротированную так, что предпочтительный
-// для streamID адрес стоит первым, остальные - следом (сохраняя порядок).
-// Раскидывает primary по стримам (балансировка relay-IP), оставляя остальные
-// как фоллбэк при DPI-дропе.
 func orderAddrs(addrs []string, streamID int) []string {
 	n := len(addrs)
 	if n <= 1 {
@@ -225,7 +177,6 @@ func orderAddrs(addrs []string, streamID int) []string {
 	return out
 }
 
-// HandleAuthError инвалидирует кэш при MaxCacheErrors в окне ErrorWindow; true = инвалидирован.
 func (c *Client) HandleAuthError(streamID int) bool {
 	cache := c.store.Get(streamID)
 	cacheID := c.store.CacheID(streamID)
@@ -244,7 +195,6 @@ func (c *Client) HandleAuthError(streamID int) bool {
 		cache.mutex.RLock()
 		link := cache.creds.Link
 		cache.mutex.RUnlock()
-		// Иначе перезапуск процесса поднял бы с диска ровно то, что TURN отверг.
 		c.creds.drop(link, cacheID)
 		cache.Invalidate()
 		c.log.Warnf("[STREAM %d] [VK Auth] Credentials cache invalidated", streamID)
@@ -253,7 +203,6 @@ func (c *Client) HandleAuthError(streamID int) bool {
 	return false
 }
 
-// ResetErrors вызывать при успешном allocate.
 func (c *Client) ResetErrors(streamID int) {
 	c.store.Get(streamID).errorCount.Store(0)
 }

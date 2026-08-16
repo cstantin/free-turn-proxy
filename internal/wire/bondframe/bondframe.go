@@ -1,6 +1,4 @@
-// Package bondframe содержит wire-формат VLESS bond multi-lane transport
-// (hello + framed data/FIN). Клиент (инициатор) и сервер (акцептор) используют
-// одинаковую кодировку.
+// Package bondframe определяет протокол кадрирования multi-lane VLESS bond (Hello, Data, FIN фреймы).
 package bondframe
 
 import (
@@ -25,14 +23,14 @@ const (
 	LaneAttachTimeout = 300 * time.Millisecond
 )
 
-// Hello - per-lane handshake header, отправляемый сразу после открытия smux-потока.
+// Hello содержит заголовок рукопожатия отдельного lane.
 type Hello struct {
 	ConnID    uint64
 	LaneIndex uint16
 	LaneCount uint16
 }
 
-// Frame - одна bonded data или FIN единица, идентифицированная Seq внутри ConnID.
+// Frame представляет единичный фрейм данных или FIN с последовательным номером Seq.
 type Frame struct {
 	Type byte
 	Seq  uint64
@@ -50,8 +48,7 @@ func WriteHello(w io.Writer, connID uint64, laneIndex, laneCount uint16) error {
 	return err
 }
 
-// ReadHelloAfterMagic завершает чтение Hello, у которого первые 4 magic-байта
-// уже прочитаны (сервер pre-peek для мультиплексирования протоколов).
+// ReadHelloAfterMagic читает остаток заголовка Hello после проверки magic-байтов.
 func ReadHelloAfterMagic(r io.Reader, magic [4]byte) (Hello, error) {
 	var hdr [17]byte
 	copy(hdr[0:4], magic[:])
@@ -118,11 +115,10 @@ func ReadFrame(r io.Reader) (Frame, error) {
 	return f, nil
 }
 
-// PendingCap ограничивает per-bond буфер переупорядочивания. Пир, генерирующий
-// seq с постоянными пропусками, не вырастит его больше этого числа фреймов.
+// PendingCap ограничивает максимальное число неупорядоченных фреймов в буфере.
 const PendingCap = 1024
 
-// ReorderHooks подключает caller-специфичное логирование к Reorder. Все поля могут быть nil.
+// ReorderHooks задаёт колбэки для обработки ошибок и событий Reorder.
 type ReorderHooks struct {
 	OnOverflow    func(have int)
 	OnUnknownType func(typ byte)
@@ -130,12 +126,7 @@ type ReorderHooks struct {
 	OnCloseWrite  func(format string, v ...any)
 }
 
-// Reorder потребляет Frame из recv, пишет payload в dst в порядке Seq и
-// возвращает число полностью доставленных чанков. Возвращается когда:
-//   - достигнут FIN seq (на dst вызывается CloseWrite);
-//   - recv закрыт;
-//   - ctx отменён;
-//   - неизвестный тип фрейма, переполнение pending или ошибка записи.
+// Reorder переупорядочивает фреймы по возрастанию Seq и записывает полезную нагрузку в dst.
 func Reorder(ctx context.Context, dst net.Conn, recv <-chan Frame, h ReorderHooks) uint64 {
 	pending := make(map[uint64][]byte)
 	var expect uint64
@@ -193,9 +184,7 @@ func Reorder(ctx context.Context, dst net.Conn, recv <-chan Frame, h ReorderHook
 	}
 }
 
-// CloseWrite полузакрывает write-сторону conn, если базовый тип поддерживает
-// это (TCPConn, smux.Stream, …); иначе no-op. errf вызывается с ошибкой при
-// сбое CloseWrite; вызывающие обычно передают debug-gated log func.
+// CloseWrite закрывает канал записи conn, если соединение поддерживает half-close.
 func CloseWrite(conn net.Conn, errf func(format string, v ...any)) {
 	type closeWriter interface {
 		CloseWrite() error

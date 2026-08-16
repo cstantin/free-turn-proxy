@@ -79,14 +79,12 @@ func TestBuildTunnelWiresPipeToBind(t *testing.T) {
 	if tunCfg.MTU != tunnel.DefaultMTU {
 		t.Errorf("MTU = %d, want %d", tunCfg.MTU, tunnel.DefaultMTU)
 	}
-	// Endpoint из файла не нужен: собеседник достижим только через релей.
 	if tunCfg.Peers[0].Endpoint != "" {
 		t.Errorf("Endpoint = %q, want empty", tunCfg.Peers[0].Endpoint)
 	}
 }
 
-// Обе половины пары закрывает close: старт мог провалиться до сессии, и тогда
-// освобождать их больше некому. Повторный вызов безопасен.
+// Проверка освобождения пайпов при закрытии TunnelParts.
 func TestTunnelPartsCloseReleasesPipes(t *testing.T) {
 	cfg := parsedConfig(t, tunnelConfigJSON(t, "wg", wgConf()))
 
@@ -106,8 +104,7 @@ func TestTunnelPartsCloseReleasesPipes(t *testing.T) {
 	}
 }
 
-// mode=wg - осознанный выбор пользователя: маскировка снимается, даже если
-// конфиг принесли от AmneziaWG.
+// Режим wg отключает параметры AmneziaWG.
 func TestBuildTunnelStripsAmneziaInWGMode(t *testing.T) {
 	cfg := parsedConfig(t, tunnelConfigJSON(t, "wg", awgConf()))
 
@@ -197,7 +194,6 @@ func TestParseTunnelConfig(t *testing.T) {
 	if p.DNS != "1.1.1.1,8.8.8.8" {
 		t.Errorf("DNS = %q", p.DNS)
 	}
-	// Маршрут, повторённый у второго пира, приходит один раз.
 	if p.AllowedIPs != "0.0.0.0/0,10.9.0.0/24" {
 		t.Errorf("AllowedIPs = %q", p.AllowedIPs)
 	}
@@ -230,8 +226,7 @@ func TestTunnelStatsWithoutTunnel(t *testing.T) {
 	}
 }
 
-// clampToInt64 - публичная логика насыщения для gomobile; проверяем граничный
-// случай math.MaxUint64, который без насыщения вызвал бы переполнение int64.
+// Проверка насыщения при math.MaxUint64 для gomobile int64.
 func TestClampToInt64Overflow(t *testing.T) {
 	if got := clampToInt64(math.MaxUint64); got != math.MaxInt64 {
 		t.Errorf("clampToInt64(MaxUint64) = %d, want MaxInt64 (%d)", got, int64(math.MaxInt64))

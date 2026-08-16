@@ -1,7 +1,4 @@
-// Package bondserver реализует серверную сторону bonded VLESS lane:
-// одно backend TCP-соединение, мультиплексированное по N smux-потокам с общим
-// ConnID. Wire-формат фреймов - internal/wire/bondframe; пакет соединяет
-// copy-loop backend TCP ↔ lanes и реестр per-ConnID.
+// Package bondserver реализует серверное демультиплексирование bonded VLESS lane в TCP-соединение к backend.
 package bondserver
 
 import (
@@ -17,16 +14,12 @@ import (
 	"github.com/xtaci/smux"
 )
 
-// laneStream - подмножество *smux.Stream, нужное serverLane. Определено как
-// интерфейс, чтобы юнит-тесты могли подменять in-memory pipe без смоделированной
-// smux-сессии.
 type laneStream interface {
 	io.Reader
 	io.Writer
 	SetDeadline(time.Time) error
 }
 
-// Deps - зависимости хост-процесса для bond-сервера.
 type Deps struct {
 	Log logx.Logger
 }
@@ -38,8 +31,7 @@ func (d *Deps) log() logx.Logger {
 	return d.Log
 }
 
-// Registry дедуплицирует одновременные lane с одинаковым ConnID
-// в одно backend TCP-соединение.
+// Registry дедуплицирует потоки с одинаковым ConnID в единое TCP-соединение.
 type Registry struct {
 	deps Deps
 
@@ -51,9 +43,7 @@ func NewRegistry(deps Deps) *Registry {
 	return &Registry{deps: deps, conns: make(map[uint64]*serverConn)}
 }
 
-// HandleStreamAfterMagic принимает smux-поток, у которого первые 4 magic-байта
-// уже прочитаны (server-side multiplex pre-peek), читает Hello, прикрепляет
-// lane и блокируется до завершения bond-соединения.
+// HandleStreamAfterMagic регистрирует поток после чтения префикса magic-байтов.
 func (r *Registry) HandleStreamAfterMagic(ctx context.Context, stream *smux.Stream, connectAddr string, magic [4]byte) {
 	r.handleStream(ctx, stream, connectAddr, func(rd io.Reader) (bondframe.Hello, error) {
 		return bondframe.ReadHelloAfterMagic(rd, magic)
@@ -283,8 +273,6 @@ func (c *serverConn) copyBackendToBond(backendConn net.Conn) {
 	for {
 		n, err := backendConn.Read(buf)
 		if n > 0 {
-			// writeToNextLane - синхронная запись (WriteFrame возвращается до
-			// переключения lane), поэтому buf[:n] передаётся напрямую - аналог bondclient.
 			if writeErr := c.writeToNextLane(seq, buf[:n], &laneIdx); writeErr != nil {
 				c.deps.log().Errorf("[bond %d] lane write data error: %v", c.id, writeErr)
 				return

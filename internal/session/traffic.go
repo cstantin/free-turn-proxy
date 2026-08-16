@@ -9,8 +9,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/stats"
 )
 
-// traffic - счётчики сессии плюс мгновенная скорость. Скорость считает тикер по
-// разнице счётчиков: на горячем пути это дешевле per-packet таймстемпов.
+// traffic агрегирует счётчики и мгновенную скорость передачи.
 type traffic struct {
 	stats  *stats.Stats
 	txRate atomic.Int64
@@ -40,8 +39,7 @@ func (t *traffic) rateMeter(ctx context.Context, interval time.Duration) {
 	}
 }
 
-// clampInt64 насыщает uint64 до int64. Реальный трафик до MaxInt64 не доходит,
-// но насыщение делает конверсию безопасной от переполнения.
+// clampInt64 безопасно приводит uint64 к int64 с насыщением при переполнении.
 func clampInt64(u uint64) int64 {
 	if u > math.MaxInt64 {
 		return math.MaxInt64

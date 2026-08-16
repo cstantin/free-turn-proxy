@@ -20,10 +20,9 @@ import (
 	"github.com/xtaci/smux"
 )
 
-// GetCredsFunc реэкспортирован из common, чтобы вызывающие не выходили за пределы импортов пакета.
 type GetCredsFunc = common.GetCredsFunc
 
-// Params - конфигурация TURN/obf для пула.
+// Params содержит конфигурацию параметров TURN/obf/KCP для пула сессий.
 type Params struct {
 	Host         string
 	Port         string
@@ -37,23 +36,16 @@ type Params struct {
 	TrafficStats *stats.Stats
 }
 
-// BondHandler распределяет одно принятое TCP-соединение по всем активным сессиям пула.
-// Nil отключает bond-режим (будет round-robin).
-// Реализация - internal/proxy/bondclient.
+// BondHandler распределяет TCP-соединение по нескольким активным сессиям пула.
 type BondHandler func(ctx context.Context, tcpConn net.Conn, connID uint64, lanes []*PooledSession)
 
-// Deps - зависимости хост-процесса для TCP-forward цикла.
+// Deps определяет внешние зависимости для цикла tcpfwd.
 type Deps struct {
-	DTLSDialer  *dtlsdial.Dialer
-	Log         logx.Logger
-	BondHandler BondHandler
-	// ConnectedStreams, если задан, зеркалит число живых сессий пула. Тот же
-	// счётчик, что udprelay ведёт для своих стримов: хосту нужен один источник
-	// "сколько каналов поднято" независимо от режима.
+	DTLSDialer       *dtlsdial.Dialer
+	Log              logx.Logger
+	BondHandler      BondHandler
 	ConnectedStreams *atomic.Int32
-	// OnTURNServer вызывается при обнаружении IP TURN-сервера.
-	// Используется для автоматического управления маршрутами. nil - no-op.
-	OnTURNServer func(ip net.IP)
+	OnTURNServer     func(ip net.IP)
 }
 
 func (d *Deps) log() logx.Logger {
@@ -63,17 +55,12 @@ func (d *Deps) log() logx.Logger {
 	return d.Log
 }
 
-// Run - точка входа TCP-forward режима. Запускает numSessions maintainer-горутин, ждёт
-// первого подключения, затем принимает локальные TCP-соединения и форвардит
-// каждое как smux-поток (round-robin) или bonded по всем активным сессиям.
+// Run запускает пул сессий, принимает локальные TCP-соединения и проксирует их через smux.
 func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, listenAddr string, numSessions int, useBond bool) error {
 	pool := &SessionPool{active: deps.ConnectedStreams}
 
 	var wgMaint sync.WaitGroup
 	for i := range numSessions {
-		// streamID 1-based - единый базис с udprelay, чтобы vkauth.Store.CacheID
-		// группировал потоки одинаково в обоих режимах. Стаггер от нуля: первая
-		// сессия стартует без задержки.
 		id := i + 1
 		stagger := time.Duration(i) * 300 * time.Millisecond
 		wgMaint.Go(func() {
@@ -192,9 +179,7 @@ func Run(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, lis
 	}
 }
 
-// maintainSession поддерживает одну TURN+DTLS+KCP+smux сессию живой:
-// 3s backoff при ошибке инициализации, 2s после отключения успешной сессии,
-// в обоих случаях перед следующей попыткой подключения.
+// maintainSession поддерживает одну сессию TURN+DTLS+KCP+smux в активном состоянии.
 func maintainSession(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, id int, pool *SessionPool) {
 	for {
 		select {
@@ -239,8 +224,7 @@ func maintainSession(ctx context.Context, deps *Deps, params *Params, peer *net.
 	}
 }
 
-// createSmuxSession создаёт полный TURN+DTLS+KCP+smux pipeline и возвращает
-// smux-сессию вместе с функцией cleanup (LIFO-разрушение).
+// createSmuxSession поднимает стек TURN+DTLS+KCP+smux и возвращает сессию smux.
 func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, id int) (*smux.Session, func(), error) {
 	var cleanupFns []func()
 	cleanup := func() {
@@ -275,8 +259,6 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	cleanupFns = append(cleanupFns, func() { _ = dtlsConn.Close() })
 	deps.log().Debugf("DTLS connection established")
 
-	// Client ID шлётся всегда первой DTLS app-record; сервер всегда читает.
-	// -clients-file на сервере решает только, проверять ли ID по allowlist.
 	if werr := clientsdb.WriteClientID(dtlsConn, params.ClientID); werr != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("send client ID: %w", werr)
@@ -305,8 +287,7 @@ func createSmuxSession(ctx context.Context, deps *Deps, params *Params, peer *ne
 	return smuxSess, cleanup, nil
 }
 
-// nonNegUint64 безопасно приводит int64-счётчик байт к uint64 (io.Copy
-// возвращает n >= 0 при успехе, но на ошибке n может быть отрицательным).
+// nonNegUint64 безопасно преобразует int64 в uint64.
 func nonNegUint64(n int64) uint64 {
 	if n < 0 {
 		return 0

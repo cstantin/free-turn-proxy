@@ -10,14 +10,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/uri"
 )
 
-// ClientJSON - схема конфига для хостов, которые не собирают командную строку
-// (мобильное приложение через gomobile). Группы зеркалят Client, поэтому
-// добавление опции не требует изобретать, где ей место.
-//
-// Декодирование строгое: неизвестное поле - ошибка. AAR и приложение собираются
-// вместе, поэтому опечатка в хосте должна падать сразу, а не молча теряться.
-// Отсутствующее поле сохраняет значение из Defaults(): DTO перед разбором
-// заполняется дефолтами, а json.Unmarshal не трогает то, чего нет во входе.
+// ClientJSON - JSON-схема конфигурации клиента (gomobile).
 type ClientJSON struct {
 	Peer     string `json:"peer"`
 	ClientID string `json:"clientId"`
@@ -34,9 +27,7 @@ type ClientJSON struct {
 	Tunnel tunnelJSON `json:"tunnel"`
 }
 
-// tunnelJSON - userspace-туннель внутри процесса. config передаётся текстом в
-// формате wg-quick: параметры AmneziaWG (Jc, S1, H1...) хост берёт из него же,
-// дублировать их отдельными полями незачем.
+// tunnelJSON - параметры встроенного wg-quick туннеля.
 type tunnelJSON struct {
 	Mode   string `json:"mode"`
 	Config string `json:"config"`
@@ -78,20 +69,16 @@ type logJSON struct {
 	Debug bool `json:"debug"`
 }
 
-// DefaultClientJSON - дефолты в виде JSON. Хост строит из них стартовое
-// состояние формы и не повторяет литералы у себя.
+// DefaultClientJSON возвращает дефолтную конфигурацию клиента в формате JSON.
 func DefaultClientJSON() string {
 	b, err := json.MarshalIndent(defaultClientJSON(), "", "  ")
 	if err != nil {
-		// Схема состоит из строк, чисел и срезов строк - маршалиться обязана.
 		panic("config: default JSON must marshal: " + err.Error())
 	}
 	return string(b)
 }
 
-// PeekSubURLJSON достаёт subUrl из конфига, не разбирая остального. Нужен до
-// ParseClientJSON: подписка отдаёт peer, без которого валидация падает.
-// Некорректный JSON - не ошибка здесь, о ней сообщит полноценный разбор.
+// PeekSubURLJSON извлекает subUrl из сырого JSON без полной валидации.
 func PeekSubURLJSON(data []byte) string {
 	var peek struct {
 		SubURL string `json:"subUrl"`
@@ -102,12 +89,7 @@ func PeekSubURLJSON(data []byte) string {
 	return peek.SubURL
 }
 
-// ParseClientJSON разбирает конфиг хоста тем же путём, что и CLI: DTO -> raw ->
-// assemble -> Validate.
-//
-// overlayURI (если не пуст) накладывается поверх, как позиционный freeturn:// у
-// CLI: так узел из подписки применяется тем же кодом, что и вручную вставленная
-// ссылка.
+// ParseClientJSON парсит JSON-конфигурацию клиента с опциональным overlayURI подписки.
 func ParseClientJSON(data []byte, overlayURI string) (*Client, error) {
 	dto := defaultClientJSON()
 	dec := json.NewDecoder(bytes.NewReader(data))

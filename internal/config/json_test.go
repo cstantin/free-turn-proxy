@@ -12,8 +12,6 @@ import (
 
 const minimalJSON = `{"peer":"1.2.3.4:5000","vk":{"links":["https://vk.ru/call/join/CODE"]}}`
 
-// Отсутствующие поля обязаны брать значения из Defaults(), иначе строгий
-// декодер заставил бы хост перечислять весь конфиг целиком.
 func TestParseClientJSONFillsDefaults(t *testing.T) {
 	c, err := ParseClientJSON([]byte(minimalJSON), "")
 	if err != nil {
@@ -65,8 +63,6 @@ func TestParseClientJSONAppliesFields(t *testing.T) {
 	}
 }
 
-// obf.timingMs учитывается только в udp-режиме - правило одно для всех
-// источников, проверяем что JSON доходит до Validate.
 func TestParseClientJSONRunsValidate(t *testing.T) {
 	in := `{"peer":"1.2.3.4:5000","vk":{"links":["A"]},"proxy":{"mode":"tcp"},` +
 		`"obf":{"profile":"rtpopus3","key":"` + testObfKey + `","timingMs":20}}`
@@ -100,7 +96,6 @@ func TestParseClientJSONOverlayURI(t *testing.T) {
 	if c.Proxy.Peer != "9.9.9.9:56000" || c.TURN.N != 5 {
 		t.Errorf("overlay not applied: peer %q, n %d", c.Proxy.Peer, c.TURN.N)
 	}
-	// Ссылки URI не несёт - значение из JSON обязано уцелеть.
 	if len(c.VK.Links) != 1 || c.VK.Links[0] != "CODE" {
 		t.Errorf("links overwritten by overlay: %v", c.VK.Links)
 	}
@@ -124,8 +119,6 @@ func TestPeekSubURLJSON(t *testing.T) {
 	}
 }
 
-// DefaultClientJSON должен сам себя разбирать: хост берёт его как стартовое
-// состояние формы и дописывает peer со ссылками.
 func TestDefaultClientJSONRoundTrip(t *testing.T) {
 	var dto ClientJSON
 	if err := json.Unmarshal([]byte(DefaultClientJSON()), &dto); err != nil {

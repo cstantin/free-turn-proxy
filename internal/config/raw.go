@@ -12,12 +12,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/wire/rtpopus"
 )
 
-// raw - опции в том виде, в каком их даёт источник: CLI-флаги, freeturn:// URI
-// или (позже) JSON мобильного хоста. Строки не разобраны, enum'ы не проверены.
-//
-// Единственный путь raw -> Client идёт через assemble, поэтому у всех
-// источников ровно одна семантика: новый источник заполняет raw и не повторяет
-// ни нормализацию, ни проверки.
+// raw хранит неразобранные строковые опции до этапа assemble.
 type raw struct {
 	Turn   string
 	Port   string
@@ -25,8 +20,8 @@ type raw struct {
 	Peer   string
 
 	Provider string
-	Link     string // устаревший -link: одна ссылка
-	Links    string // -links: через запятую
+	Link     string
+	Links    string
 
 	N              int
 	StreamsPerCred int
@@ -55,8 +50,7 @@ type raw struct {
 	TunnelMTU    int
 }
 
-// applyURI накладывает freeturn:// поверх raw: URI побеждает флаги, но только
-// теми полями, которые в нём есть - остальное остаётся от источника.
+// applyURI применяет параметры freeturn:// поверх raw-опций.
 func (r *raw) applyURI(u *uri.Config) {
 	if u.Provider != "" {
 		r.Provider = u.Provider
@@ -102,7 +96,6 @@ func (r *raw) applyURI(u *uri.Config) {
 	}
 }
 
-// Превращает raw в Client: разбирает энумы, нормализует ссылки, декодирует ключ.
 func assemble(r raw) (*Client, error) {
 	switch r.Transport {
 	case TransportTCP, TransportUDP:
@@ -114,8 +107,6 @@ func assemble(r raw) (*Client, error) {
 	default:
 		return nil, fmt.Errorf("invalid -mode value %q: must be %s | %s", r.Mode, ModeUDP, ModeTCP)
 	}
-	// Проверяется на raw: в Client комбинация уже свёрнута в один ProxyMode и
-	// "-bond без tcp" от обычного udp не отличить.
 	if r.Bond && r.Mode != ModeTCP {
 		return nil, errors.New("-bond requires -mode tcp")
 	}
@@ -177,7 +168,6 @@ func assemble(r raw) (*Client, error) {
 		c.DNS.Servers = strings.Split(r.DNSServers, ",")
 	}
 
-	// -gen-obf-key печатает новый ключ и выходит: разбирать переданный незачем.
 	if c.Obf.GenKey {
 		return c, nil
 	}
@@ -193,7 +183,7 @@ func assemble(r raw) (*Client, error) {
 	return c, nil
 }
 
-// Вытаскивает join-код из ссылки (принимает URL и голый код).
+// normalizeVKLinks извлекает join-код звонка из URL или строки кода.
 func normalizeVKLinks(links, link string) []string {
 	items := strings.Split(links, ",")
 	if len(items) == 1 && items[0] == "" {

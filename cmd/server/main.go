@@ -36,11 +36,9 @@ func main() {
 
 	cfg, err := config.ParseServer(os.Args[1:], os.Stderr)
 	if err != nil {
-		// -help/-h: usage уже напечатан в ParseServer, выходим штатно.
 		if errors.Is(err, flag.ErrHelp) {
 			os.Exit(0)
 		}
-		// логгер ещё не создан - единственный fatal до его инициализации.
 		log.Fatalf("%v", err)
 	}
 	logger := logx.New(cfg.Log.Debug)
@@ -180,8 +178,7 @@ func handleAccepted(ctx context.Context, logger logx.Logger, registry *bondserve
 	}
 	logger.Debugf("Handshake done")
 
-	// Client ID читается всегда (клиент всегда шлёт его первой app-record) -
-	// wire-контракт симметричен. -clients-file включает только enforce по allowlist.
+	// Wire-контракт: клиент всегда передаёт Client ID первой app-record.
 	clientID, err := clientsdb.ReadClientID(dtlsConn)
 	if err != nil {
 		logger.Warnf("Read Client ID failed: %v", err)
@@ -212,7 +209,6 @@ func handleClientsCommand(args []string) {
 		os.Exit(1)
 	}
 
-	// Файл по умолчанию или из переменной окружения
 	dbPath := "clients.json"
 	if envPath := os.Getenv("CLIENTS_FILE"); envPath != "" {
 		dbPath = envPath

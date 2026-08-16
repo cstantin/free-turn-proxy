@@ -14,8 +14,6 @@ import (
 	tlsclient "github.com/bogdanfinn/tls-client"
 )
 
-// openJoinPage повторяет вход посетителя: ссылку сначала открывают документом, и
-// только со страницы уходят вызовы API. Тело не нужно - берём куки и сам факт навигации.
 func (c *Client) openJoinPage(ctx context.Context, httpClient tlsclient.HttpClient, profile browserprofile.Profile, link string) error {
 	req, err := fhttp.NewRequestWithContext(ctx, fhttp.MethodGet, "https://vk.ru/call/join/"+link, nil)
 	if err != nil {
@@ -26,7 +24,6 @@ func (c *Client) openJoinPage(ctx context.Context, httpClient tlsclient.HttpClie
 	req.Header.Set("Sec-Fetch-Dest", "document")
 	req.Header.Set("Sec-Fetch-Mode", "navigate")
 	req.Header.Set("Sec-Fetch-User", "?1")
-	// Ссылку открывают из мессенджера или адресной строки - реферера нет.
 	req.Header.Set("Sec-Fetch-Site", "none")
 	browserprofile.ApplyFhttp(req, profile)
 
@@ -64,7 +61,6 @@ func (c *Client) doRequest(ctx context.Context, httpClient tlsclient.HttpClient,
 	req.Header.Set("Sec-Fetch-Site", "same-site")
 	req.Header.Set("Sec-Fetch-Mode", "cors")
 	req.Header.Set("Sec-Fetch-Dest", "empty")
-	// Последним: персона снимает свои невозможные заголовки и задаёт порядок.
 	browserprofile.ApplyFhttp(req, profile)
 
 	httpResp, err := httpClient.Do(req)

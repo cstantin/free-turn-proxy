@@ -75,8 +75,8 @@ func TestStatsEnabledAccumulates(t *testing.T) {
 	s.AddTx(100)
 	s.AddTx(50)
 	s.AddRx(7)
-	s.AddTx(-5) // negative: ignored
-	s.AddRx(0)  // zero: ignored
+	s.AddTx(-5)
+	s.AddRx(0)
 	if got := s.tx.Load(); got != 150 {
 		t.Errorf("tx=%d, want 150", got)
 	}

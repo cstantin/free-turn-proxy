@@ -6,13 +6,7 @@ import (
 	"strings"
 )
 
-// UAPI собирает конфигурацию в формат, который понимает device.IpcSet.
-// Формат: строки "ключ=значение", пиры идут после своего public_key.
-//
-// Параметры Amnezia печатаются только когда заданы: устройство отвергает
-// jc/jmin/jmax <= 0, поэтому "выключено" - это отсутствие ключа, а не ноль.
-// Отсюда же и совместимость с ванильным WireGuard: пустой AmneziaParams не
-// добавляет в поток ни байта.
+// UAPI сериализует Config в строковый протокол IPC для device.IpcSet.
 func UAPI(c *Config) (string, error) {
 	if err := c.Validate(); err != nil {
 		return "", err
@@ -27,7 +21,6 @@ func UAPI(c *Config) (string, error) {
 	}
 
 	line("private_key", hex.EncodeToString(c.PrivateKey[:]))
-	// Порт не назначаем: исходящий канал даёт Bind, слушать нечего.
 	line("listen_port", "0")
 	writeAmnezia(line, c.Amnezia)
 	line("replace_peers", "true")
@@ -38,8 +31,6 @@ func UAPI(c *Config) (string, error) {
 		if !p.PresharedKey.IsZero() {
 			line("preshared_key", hex.EncodeToString(p.PresharedKey[:]))
 		}
-		// Пир без endpoint'а никогда не начнёт handshake, поэтому строка есть
-		// всегда: при работе через SinglePeerBind её содержимое игнорируется.
 		if p.Endpoint != "" {
 			line("endpoint", p.Endpoint)
 		} else {

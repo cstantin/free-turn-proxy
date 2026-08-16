@@ -74,7 +74,6 @@ PersistentKeepalive = 25
 	if len(cfg.Addresses) != 2 {
 		t.Errorf("Addresses = %v", cfg.Addresses)
 	}
-	// example.org - search domain, а не резолвер: в DNS попасть не должен.
 	if len(cfg.DNS) != 2 {
 		t.Errorf("DNS = %v, want two addresses", cfg.DNS)
 	}
@@ -88,8 +87,6 @@ PersistentKeepalive = 25
 }
 
 func TestParseAmneziaParams(t *testing.T) {
-	// awg-параметры живут в [Interface], поэтому конфиг собирается вручную:
-	// после секции [Peer] те же ключи относились бы к пиру.
 	conf := "[Interface]\nPrivateKey = " + privKey + "\n" +
 		"Jc = 4\nJmin = 40\nJmax = 70\nS1 = 15\nS2 = 22\n" +
 		"H1 = 1\nH2 = 2-5\nH3 = 3\nH4 = 4\nI1 = <b 0xf1><c>\nI5 = <r 10>\n\n" +
@@ -140,7 +137,6 @@ func TestParseCaseInsensitiveKeys(t *testing.T) {
 	}
 }
 
-// Голый адрес без маски клиенты пишут наравне с CIDR.
 func TestParseBareAddress(t *testing.T) {
 	conf := "[Interface]\nPrivateKey = " + privKey + "\nAddress = 10.8.0.2\n\n" +
 		"[Peer]\nPublicKey = " + pubKey + "\nAllowedIPs = 0.0.0.0/0\n"
@@ -193,7 +189,6 @@ func TestParseErrors(t *testing.T) {
 	}
 }
 
-// Разобранный конфиг обязан доходить до UAPI без дополнительной обработки.
 func TestParseFeedsUAPI(t *testing.T) {
 	cfg, err := Parse(minimalConf())
 	if err != nil {

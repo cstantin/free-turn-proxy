@@ -127,7 +127,6 @@ func TestWatchReportsConnected(t *testing.T) {
 	}
 	cancel()
 
-	// Живой стрим снимает watchdog: таймаут давно прошёл, но ошибки нет.
 	if err := <-errCh; err != nil {
 		t.Fatalf("watch() error = %v, want nil", err)
 	}
@@ -154,8 +153,6 @@ func TestWatchCaptchaSuspendsTimeout(t *testing.T) {
 	}
 }
 
-// recordingObserver собирает переходы для проверки, что события приходят
-// только на изменение.
 type recordingObserver struct {
 	mu     sync.Mutex
 	phases []Phase
@@ -182,7 +179,6 @@ func TestObserverSeesOnlyChanges(t *testing.T) {
 	errCh := make(chan error, 1)
 	go func() { errCh <- s.watch(ctx, cancel) }()
 
-	// Десяток тиков с неизменным состоянием не должен дать ни одного события.
 	time.Sleep(60 * time.Millisecond)
 	if got := obs.snapshot(); len(got) != 0 {
 		t.Fatalf("phases = %v, want none while state is unchanged", got)
@@ -204,7 +200,6 @@ func TestRunEmitsFirstPhaseEvenIfUnchanged(t *testing.T) {
 	s := newTestSession(t, Options{}, nil)
 	s.deps.Observer = obs
 
-	// New заготовил ровно это состояние - событие всё равно обязано прийти.
 	s.publish(&statusInfo{phase: PhaseConnecting, total: s.total}, true)
 
 	if got := obs.snapshot(); len(got) != 1 || got[0] != PhaseConnecting {
@@ -218,7 +213,6 @@ func TestObserverGetsTerminalPhase(t *testing.T) {
 	s.deps.Observer = obs
 	s.started.Store(true)
 
-	// Run на уже стартовавшей сессии не трогает наблюдателя.
 	if err := s.Run(context.Background()); err != ErrAlreadyRun {
 		t.Fatalf("Run() error = %v", err)
 	}

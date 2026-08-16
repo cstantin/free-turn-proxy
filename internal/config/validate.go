@@ -8,12 +8,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/tunnel"
 )
 
-// Validate проверяет смысловые правила собранного клиентского конфига.
-// Работает по Client, а не по источнику, поэтому одинаково применима к CLI,
-// freeturn:// URI и JSON от мобильного хоста.
-//
-// Структурные проверки (валидность -transport/-mode, декод ключа) делает
-// assemble: там ещё видны сырые значения.
+// Validate проверяет валидность конфигурации Client.
 func Validate(c *Client) error {
 	if c == nil {
 		return errors.New("nil client config")
@@ -54,8 +49,7 @@ func Validate(c *Client) error {
 	return validateObfTiming(c.Obf, c.Proxy.Mode)
 }
 
-// validateTunnel: WireGuard - UDP-протокол, поверх tcp-форвардера (Xray) его
-// поднимать нечем, поэтому туннель разрешён только в udp-режиме прокси.
+// validateTunnel проверяет параметры userspace-туннеля (доступен только в mode udp).
 func validateTunnel(t TunnelOpts, mode ProxyMode) error {
 	if t.Mode != "" && !t.Mode.Valid() {
 		return fmt.Errorf("invalid tunnel mode %q: must be %s | %s | %s",
@@ -89,8 +83,7 @@ func ValidateServer(s *Server) error {
 	return validateObfTiming(s.Obf, s.Proxy.Mode)
 }
 
-// validateObfTiming ограничивает -obf-timing UDP-релеем с включённой обфускацией:
-// без RTP-профиля паковать нечего, а в tcp-режиме pacing ломает RTT/конгешн KCP.
+// validateObfTiming проверяет pacing (только для режима udp с включенной обфускацией).
 func validateObfTiming(o ObfOpts, mode ProxyMode) error {
 	if o.Timing <= 0 {
 		return nil

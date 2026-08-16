@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// validClient - минимальный конфиг, проходящий Validate. Строится как это будет
-// делать не-CLI источник: дефолты плюс обязательные поля.
 func validClient() *Client {
 	c := Defaults()
 	c.Proxy.Peer = "1.2.3.4:5000"

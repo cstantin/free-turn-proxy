@@ -1,7 +1,4 @@
-// Package udprelay реализует UDP-режим прокси: терминирует DTLS от локального
-// пира (WireGuard) и ретранслирует пакеты через per-stream TURN-аллокацию
-// обратно к удалённому пиру. Run - точка входа; владеет локальным listener,
-// fan-in входящего dispatch и per-stream DTLS/TURN циклами.
+// Package udprelay реализует ретрансляцию UDP-трафика через параллельные DTLS/TURN сессии.
 package udprelay
 
 import (
@@ -19,13 +16,9 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/wake"
 )
 
-// GetCredsFunc реэкспортирован из common, чтобы вызывающие не выходили за пределы импортов пакета.
 type GetCredsFunc = common.GetCredsFunc
 
-// AuthHandler - подмножество provider.Provider, необходимое пакету.
-// Определено как локальный интерфейс, чтобы тесты могли подменять fake без
-// импорта реализации провайдера. Sentinel-ошибки auth-флоу проверяются через
-// provider.ErrXxx.
+// AuthHandler определяет интерфейс взаимодействия с провайдером при ошибках авторизации.
 type AuthHandler interface {
 	IsAuthError(err error) bool
 	HandleAuthError(streamID int) bool
@@ -33,7 +26,7 @@ type AuthHandler interface {
 	BackoffUntilUnix() int64
 }
 
-// Params - per-stream конфигурация TURN/wrap, общая для DTLS и TURN циклов.
+// Params содержит конфигурацию подключения к TURN и параметры обфускации.
 type Params struct {
 	Host         string
 	Port         string
@@ -46,36 +39,20 @@ type Params struct {
 	TrafficStats *stats.Stats
 }
 
-// streamStartBarrier - максимум, который стримы 2..N ждут прогрева кэша
-// credentials стримом 1 перед стартом. Защита от вечного стопора, если
-// стрим 1 не поднимается.
 const streamStartBarrier = 20 * time.Second
 
-// ErrFatal возвращается из Run, когда поток встречает условие, требующее
-// завершения всего приложения (см. provider.ErrFatalNoStreams). Вызывающий
-// должен проверить через errors.Is и вызвать os.Exit сам - udprelay не
-// вмешивается в хост-процесс.
+// ErrFatal возвращается при фатальных ошибках провайдера, требующих остановки клиента.
 var ErrFatal = errors.New("udprelay: fatal error")
 
-// Deps объединяет всё, что циклы берут из хост-процесса. Атомики принадлежат
-// Run и экспонированы здесь, чтобы DTLSLoop/TURNLoop могли разделять их при
-// прямом вызове (Run подключает их автоматически).
 type Deps struct {
 	DTLSDialer       *dtlsdial.Dialer
 	Auth             AuthHandler
 	Log              logx.Logger
 	ActiveLocalPeer  *atomic.Value
 	ConnectedStreams *atomic.Int32
-	// OnTURNServer вызывается при обнаружении IP TURN-сервера.
-	// Используется для автоматического управления маршрутами. nil - no-op.
-	OnTURNServer func(ip net.IP)
-	// Wake сигналит о пробуждении устройства: аллокации за время сна умерли, а
-	// ждать этого от ChannelBind refresh - до ~10 минут молчащего туннеля.
-	// nil - сигнала нет.
-	Wake *wake.Notifier
-	// fatalCh - внутренний сигнальный канал; устанавливается Run, пишется
-	// TURNLoop, читается Run для проброса фатальной ошибки наверх.
-	fatalCh chan error
+	OnTURNServer     func(ip net.IP)
+	Wake             *wake.Notifier
+	fatalCh          chan error
 }
 
 func (d *Deps) log() logx.Logger {
@@ -85,21 +62,9 @@ func (d *Deps) log() logx.Logger {
 	return d.Log
 }
 
-// woke - канал ближайшего пробуждения. Брать заново после каждого срабатывания.
 func (d *Deps) woke() <-chan struct{} { return d.Wake.Chan() }
 
-// Run - точка входа UDP-режима. Читает пакеты локального пира из listenConn,
-// распределяет их в общую очередь и запускает numStreams пар (DTLSLoop, TURNLoop).
-//
-// listenConn - канал до локального пира (WireGuard/Xray). Вызывающий решает,
-// что это: UDP-сокет на cfg.Proxy.Listen или пара в памяти, когда туннель
-// поднят внутри процесса. Run владеет им и закрывает при отмене ctx.
-//
-// connectedStreams принадлежит вызывающему (provider может читать через свой
-// StreamsAlive-аналог) и инкрементируется/декрементируется в oneTURN.
-// Возвращается после выхода всех потоков (т.е. при отмене ctx).
-// При фатальной provider-ошибке возвращает ErrFatal - вызывающий делает
-// os.Exit без вмешательства udprelay в хост-процесс.
+// Run запускает прием входящего UDP-трафика и распределяет его по пулу пар DTLSLoop/TURNLoop.
 func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, logger logx.Logger, connectedStreams *atomic.Int32, onTURNServer func(net.IP), waker *wake.Notifier, params *Params, peer *net.UDPAddr, listenConn net.PacketConn, numStreams int) error {
 	context.AfterFunc(ctx, func() {
 		if closeErr := listenConn.Close(); closeErr != nil {
@@ -124,9 +89,6 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 		fatalCh:          fatalCh,
 	}
 
-	// runCtx отменяется при обнаружении фатальной ошибки (через fatalCh),
-	// распространяя отмену во все потоковые циклы без необходимости хранить
-	// ссылку на cancel-функцию хост-процесса.
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
 
@@ -137,12 +99,7 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 	})
 	t := time.Tick(200 * time.Millisecond)
 
-	// Стрим 1 стартует первым и сигналит okchan при первом успешном handshake.
-	// Остальные стримы ждут этот сигнал (или ctx/safety-timeout), чтобы не бить
-	// по VK API одновременно: стрим 1 прогревает кэш credentials
-	// (streams-per-cred), после чего 2..N переиспользуют тёплый кэш вместо N
-	// параллельных запросов к VK - это снимает thundering herd на старте
-	// (частая причина rate-limit/captcha при одновременном подъёме всех стримов).
+	// Стрим 1 стартует первым для прогрева кэша учетных данных.
 	okchan := make(chan struct{}, 1)
 	{
 		cchan := make(chan net.PacketConn)
@@ -154,8 +111,6 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 		})
 	}
 
-	// Барьер: ждём первый успешный стрим, отмену ctx, либо safety-timeout -
-	// если стрим 1 не поднимается, не стопорим остальные навсегда (liveness).
 	select {
 	case <-okchan:
 	case <-runCtx.Done():
@@ -173,9 +128,6 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 		})
 	}
 
-	// При фатальной ошибке отменяем остальные горутины и пробрасываем наверх.
-	// watcherDone синхронизирует watcher-горутину с возвратом Run, обеспечивая
-	// happens-after между store и load fatalErr.
 	var fatalErr atomic.Pointer[error]
 	watcherDone := make(chan struct{})
 	go func() {

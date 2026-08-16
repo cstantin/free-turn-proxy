@@ -1,8 +1,4 @@
-// Package statedir выбирает, куда клиент кладёт своё состояние между запусками.
-//
-// Каталоги-кандидаты перебираются по порядку: право на запись зависит от хоста
-// (на Android каталог бинаря read-only), поэтому вызывающий пробует все и
-// работает дальше, даже если не сохранилось нигде.
+// Package statedir управляет путями сохранения состояния клиента между запусками.
 package statedir
 
 import (
@@ -11,16 +7,10 @@ import (
 	"sync/atomic"
 )
 
-// dirOverride задаёт хост, которому кандидаты по умолчанию не подходят: из
-// app-uid Android недоступен ни один из них (каталог бинаря read-only,
-// UserConfigDir и TempDir принадлежат не приложению), и состояние молча
-// оставалось бы в памяти.
-//
 //nolint:gochecknoglobals // ставится один раз на процесс до первого Paths
 var dirOverride atomic.Pointer[string]
 
-// SetDir переводит всё состояние клиента в dir. Пустая строка возвращает перебор
-// кандидатов. Вызывать до первого Paths.
+// SetDir переопределяет каталог состояния (актуально для Android app-uid).
 func SetDir(dir string) {
 	if dir == "" {
 		dirOverride.Store(nil)
@@ -29,8 +19,7 @@ func SetDir(dir string) {
 	dirOverride.Store(&dir)
 }
 
-// Paths - пути файла name в порядке предпочтения: рядом с бинарём (desktop,
-// переносимость), затем per-user UserConfigDir и TempDir.
+// Paths возвращает список путей к файлу name в порядке приоритета.
 func Paths(name string) []string {
 	if dir := dirOverride.Load(); dir != nil {
 		return []string{filepath.Join(*dir, name)}
@@ -60,8 +49,7 @@ func Paths(name string) []string {
 	return paths
 }
 
-// ReadEach возвращает содержимое всех читаемых путей в порядке предпочтения:
-// битый файл в начале списка не должен прятать целый в конце.
+// ReadEach возвращает содержимое всех читаемых файлов из paths.
 func ReadEach(paths []string) [][]byte {
 	out := make([][]byte, 0, len(paths))
 	for _, path := range paths {
@@ -73,7 +61,7 @@ func ReadEach(paths []string) [][]byte {
 	return out
 }
 
-// WriteFirst пишет data по первому доступному пути; false - не открылся ни один.
+// WriteFirst сохраняет data по первому доступному для записи пути.
 func WriteFirst(paths []string, data []byte) bool {
 	for _, path := range paths {
 		if os.MkdirAll(filepath.Dir(path), 0o700) != nil {
@@ -86,9 +74,7 @@ func WriteFirst(paths []string, data []byte) bool {
 	return false
 }
 
-// Через временный файл: состояние пишется ради переживания убитого процесса
-// (sticky-рестарт на Android), а обрезанный на полуслове JSON читается как
-// "состояния нет" - ровно то, от чего файл и спасает.
+// writeAtomic атомарно перезаписывает файл через .tmp, предотвращая частичную запись.
 func writeAtomic(path string, data []byte) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil { //nolint:gosec // 0o600 для файла с секретами
