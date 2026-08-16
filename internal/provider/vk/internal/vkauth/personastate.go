@@ -2,6 +2,7 @@ package vkauth
 
 import (
 	"encoding/json"
+	"sync"
 
 	"github.com/samosvalishe/free-turn-proxy/internal/statedir"
 )
@@ -22,15 +23,24 @@ type genStore struct {
 	paths []string
 }
 
+// Берётся максимум, а не первое совпадение: писать WriteFirst может не в тот
+// путь, из которого читается (каталог бинаря бывает read-only, а не пустой), и
+// протухший файл впереди списка вечно затенял бы свежий.
 func (s genStore) load(seed string) int {
+	best := 0
 	for _, b := range statedir.ReadEach(s.paths) {
 		var st personaState
-		if json.Unmarshal(b, &st) == nil && st.Seed == seed && st.Gen > 0 {
-			return st.Gen
+		if json.Unmarshal(b, &st) == nil && st.Seed == seed && st.Gen > best {
+			best = st.Gen
 		}
 	}
-	return 0
+	return best
 }
+
+// load+write одной операцией - иначе параллельные save затрут друг друга.
+//
+//nolint:gochecknoglobals // файл пишет один процесс, процессного лока хватает
+var genMu sync.Mutex
 
 // save не понижает поколение: несколько vk.Provider (multi-link) делят один файл
 // и сжигают персоны независимо.
@@ -38,6 +48,8 @@ func (s genStore) save(seed string, gen int) bool {
 	if len(s.paths) == 0 {
 		return false
 	}
+	genMu.Lock()
+	defer genMu.Unlock()
 	if gen <= s.load(seed) {
 		return true
 	}

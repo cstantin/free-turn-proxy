@@ -80,7 +80,22 @@ func (s *captchaSession) powEnvelope(p powParams) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("captcha pow encode: %w", err)
 	}
+	// Печатаем до base64: диффать с живым браузером (см. DecodePowEnvelope) иначе нечем.
+	s.logger().Debugf("[Captcha] pow envelope: %s", envelope)
 	return p.Prefix + base64.StdEncoding.EncodeToString(envelope), nil
+}
+
+// DecodePowEnvelope разворачивает значение window.captchaPowResult обратно в JSON.
+func DecodePowEnvelope(value string) string {
+	payload := value
+	if _, rest, ok := strings.Cut(value, "."); ok {
+		payload = rest
+	}
+	raw, err := base64.StdEncoding.DecodeString(payload)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }
 
 func solvePoW(ctx context.Context, input string, difficulty int) (string, int) {

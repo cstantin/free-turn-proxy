@@ -51,9 +51,28 @@ type Profile struct {
 	DeviceJSON string
 	// VisitorID - идентификатор FingerprintJS этой личности.
 	VisitorID string
+
+	// Возможности JS, которые captcha спрашивает и вне device: значения те же,
+	// что уехали в DeviceJSON, второго источника быть не должно. Скаляры, а не
+	// device: Profile обязан оставаться сравнимым.
+	cores     int
+	memGB     int
+	webdriver bool
 }
 
 func (p Profile) IsMobile() bool { return p.Platform == Mobile }
+
+func (p Profile) HardwareConcurrency() int { return p.cores }
+
+func (p Profile) Webdriver() bool { return p.webdriver }
+
+// DeviceMemory возвращает nil там, где браузер не отдаёт navigator.deviceMemory.
+func (p Profile) DeviceMemory() *int {
+	if p.memGB == 0 {
+		return nil
+	}
+	return &p.memGB
+}
 
 // device - то, что виджет captcha собирает из navigator/screen. Порядок полей
 // повторяет порядок ключей в объекте виджета, отсутствующие в браузере поля
@@ -119,6 +138,8 @@ var desktopSpecs = []spec{
 // Chrome морозит мобильный UA до "Android 10; K" на всех устройствах, поэтому
 // персоны различаются только железом.
 var mobileSpecs = []spec{
+	// Снято с живого устройства: innerWidth на 1 меньше screenWidth (округление при dpr 3.5).
+	{userAgent: uaAndroid, chPlatform: `"Android"`, dev: newDevice(364, 793, 793, 363, 671, 3.5, 8, 8)},
 	{userAgent: uaAndroid, chPlatform: `"Android"`, dev: newDevice(393, 852, 852, 393, 659, 3, 8, 8)},
 	{userAgent: uaAndroid, chPlatform: `"Android"`, dev: newDevice(412, 915, 915, 412, 724, 2.625, 8, 4)},
 	{userAgent: uaAndroid, chPlatform: `"Android"`, dev: newDevice(360, 800, 800, 360, 612, 3, 8, 4)},
@@ -194,6 +215,10 @@ func withDevice(p Profile, d device) Profile {
 		return p
 	}
 	p.DeviceJSON = string(data)
+	p.cores, p.webdriver = d.HardwareConcurrency, d.Webdriver
+	if d.DeviceMemory != nil {
+		p.memGB = *d.DeviceMemory
+	}
 	return p
 }
 

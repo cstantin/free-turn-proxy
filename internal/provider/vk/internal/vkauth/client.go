@@ -49,6 +49,14 @@ type Config struct {
 	// личность персоны. Пустая -> случайная на запуск.
 	FingerprintSeed string
 
+	// StatePaths - кандидаты файла с поколением персоны (первый доступный на
+	// запись). Пустые -> поколение живёт только в памяти процесса.
+	StatePaths []string
+
+	// CredsPaths - кандидаты файла с кэшем TURN-реквизитов. Пустые -> кэш живёт
+	// только в памяти, и перезапуск процесса всегда платит VK-цепочку заново.
+	CredsPaths []string
+
 	// Log - уровневый логгер. nil -> no-op.
 	Log logx.Logger
 }
@@ -64,12 +72,14 @@ type Client struct {
 	log         logx.Logger
 
 	store *Store
+	creds credsStore
 
 	lockout atomic.Int64
 
 	personaMu sync.RWMutex
 	identity  browserprofile.Identity
 	persona   browserprofile.Profile
+	gens      genStore
 
 	fetchMu       sync.Mutex
 	lastFetchTime time.Time
@@ -98,6 +108,7 @@ func New(cfg Config) *Client {
 		manualSolve: cfg.ManualSolver,
 		log:         cfg.Log,
 		store:       NewStore(cfg.StreamsPerCache),
+		creds:       credsStore{paths: cfg.CredsPaths},
 	}
 	if len(c.credentials) == 0 {
 		c.credentials = DefaultCredentials
@@ -117,8 +128,12 @@ func New(cfg Config) *Client {
 		// Пустой seed у всех установок дал бы им одну личность на всех.
 		seed = randx.Hex(16)
 	}
-	c.identity = browserprofile.Identity{Seed: seed}
+	c.gens = genStore{paths: cfg.StatePaths}
+	c.identity = browserprofile.Identity{Seed: seed, Gen: c.gens.load(seed)}
 	c.persona = browserprofile.For(c.platform, c.identity)
+	if c.identity.Gen > 0 {
+		c.log.Infof("[VK Auth] Persona gen=%d restored | User-Agent: %s", c.identity.Gen, c.persona.UserAgent)
+	}
 	return c
 }
 
@@ -135,9 +150,12 @@ func (c *Client) burnPersona(streamID int) {
 	c.personaMu.Lock()
 	c.identity.Gen++
 	c.persona = browserprofile.For(c.platform, c.identity)
-	ua, gen := c.persona.UserAgent, c.identity.Gen
+	ua, gen, seed := c.persona.UserAgent, c.identity.Gen, c.identity.Seed
 	c.personaMu.Unlock()
 	c.log.Infof("[STREAM %d] [VK Auth] Persona burned, gen=%d | User-Agent: %s", streamID, gen, ua)
+	if !c.gens.save(seed, gen) && len(c.gens.paths) > 0 {
+		c.log.Warnf("[STREAM %d] [VK Auth] Persona gen not persisted (%v) - burned fingerprint returns after restart", streamID, c.gens.paths)
+	}
 }
 
 // GetCredentials -> (username, password, server-addrs); addrs ротированы под
@@ -164,6 +182,15 @@ func (c *Client) GetCredentials(ctx context.Context, link string, streamID int) 
 		return cache.creds.Username, cache.creds.Password, orderAddrs(cache.creds.ServerAddrs, streamID), nil
 	}
 
+	// Кэш с прошлого запуска процесса: в окне до протухания вся VK-цепочка
+	// (4 шага, троттлинг, captcha) не нужна вовсе.
+	if restored, ok := c.creds.load(link, cacheID); ok {
+		cache.creds = restored
+		c.log.Infof("[STREAM %d] [VK Auth] Credentials restored from state (cache=%d, expires in %v)",
+			streamID, cacheID, time.Until(restored.ExpiresAt).Truncate(time.Second))
+		return restored.Username, restored.Password, orderAddrs(restored.ServerAddrs, streamID), nil
+	}
+
 	user, pass, addrs, err := c.fetchSerialized(ctx, link, streamID)
 	if err != nil {
 		return "", "", nil, err
@@ -173,9 +200,12 @@ func (c *Client) GetCredentials(ctx context.Context, link string, streamID int) 
 		Username:    user,
 		Password:    pass,
 		ServerAddrs: addrs,
-		ExpiresAt:   time.Now().Add(CredentialLifetime - CacheSafetyMargin),
-		Link:        link,
+		// Round(0) снимает монотонную компоненту: она не идёт во время сна
+		// устройства, и через полчаса suspend'а протухшее выглядело бы свежим.
+		ExpiresAt: time.Now().Add(CredentialLifetime - CacheSafetyMargin).Round(0),
+		Link:      link,
 	}
+	c.creds.save(cacheID, cache.creds)
 	return user, pass, orderAddrs(addrs, streamID), nil
 }
 
@@ -211,6 +241,11 @@ func (c *Client) HandleAuthError(streamID int) bool {
 
 	if count >= MaxCacheErrors {
 		c.log.Warnf("[VK Auth] Multiple auth errors (%d), invalidating cache %d for stream %d", count, cacheID, streamID)
+		cache.mutex.RLock()
+		link := cache.creds.Link
+		cache.mutex.RUnlock()
+		// Иначе перезапуск процесса поднял бы с диска ровно то, что TURN отверг.
+		c.creds.drop(link, cacheID)
 		cache.Invalidate()
 		c.log.Warnf("[STREAM %d] [VK Auth] Credentials cache invalidated", streamID)
 		return true

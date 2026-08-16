@@ -3,14 +3,11 @@ package captcha
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	neturl "net/url"
 	"regexp"
 	"sort"
@@ -39,10 +36,6 @@ const (
 )
 
 var (
-	reCaptchaPowInput   = regexp.MustCompile(`const\s+powInput\s*=\s*"([^"]+)"`)
-	reCaptchaDifficulty = regexp.MustCompile(`const\s+difficulty\s*=\s*(\d+)`)
-	// Префикс версии берётся со страницы: VK меняет его без предупреждения.
-	reCaptchaPowResult  = regexp.MustCompile(`captchaPowResult\s*=\s*['"]([A-Za-z0-9._-]*)['"]\s*\+\s*btoa`)
 	reCaptchaScriptSrc  = regexp.MustCompile(`src="(https://[^"]+not_robot_captcha[^"]+)"`)
 	reCaptchaInitGlobal = regexp.MustCompile(`window\.init\s*=\s*\{`)
 	reCaptchaDebugInfo  = regexp.MustCompile(`debug_info:(?:[^"]*\|\|)?"([a-fA-F0-9]{64})"`)
@@ -63,11 +56,9 @@ type captchaInitSetting struct {
 }
 
 type captchaPage struct {
-	PowInput      string
-	PowDifficulty int
-	PowPrefix     string
-	ScriptURL     string
-	Init          captchaInitData
+	Pow       powParams
+	ScriptURL string
+	Init      captchaInitData
 }
 
 // captchaInitData - состояние из window.init: пока оно есть, виджет не ходит в
@@ -77,13 +68,6 @@ type captchaInitData struct {
 	APIHost  string
 	ShowType string
 	Content  captchaContentRef
-}
-
-// powResult - конверт window.captchaPowResult: виджету уходит не голый хэш.
-type powResult struct {
-	Hash       string `json:"hash"`
-	Nonce      int    `json:"nonce"`
-	DurationMs int64  `json:"duration_ms"`
 }
 
 type captchaCheck struct {
@@ -129,6 +113,8 @@ type captchaSession struct {
 	sensors sensorConfig
 	// sensorsStart - ответ settings: с него виджет начинает тикать таймером телеметрии.
 	sensorsStart time.Time
+	// started - начало решения; все http-строки лога отмечены смещением от него.
+	started time.Time
 }
 
 func (s *captchaSession) logger() logx.Logger {
@@ -163,6 +149,7 @@ func Solve(
 		browserFP: profile.VisitorID,
 		downlink:  sessionDownlink(),
 		sensors:   defaultSensorConfig(),
+		started:   time.Now(),
 	}
 
 	for attempt := 1; attempt <= captchaMaxAttempts; attempt++ {
@@ -191,7 +178,7 @@ func Solve(
 func (s *captchaSession) solveOnce(captchaErr *Error) (string, error) {
 	s.domain = captchaDomainFromRedirectURI(captchaErr.RedirectURI)
 	s.setPageURL(captchaErr.RedirectURI)
-	s.logger().Debugf("[Captcha] using domain=%s page_origin=%s", s.domain, s.pageOrigin)
+	s.logger().Debugf("[Captcha] using domain=%s page=%s", s.domain, SafeURL(s.pageURL))
 
 	html, err := s.fetchCaptchaHTML(captchaErr.RedirectURI)
 	if err != nil {
@@ -201,7 +188,7 @@ func (s *captchaSession) solveOnce(captchaErr *Error) (string, error) {
 
 	page, err := parseCaptchaPage(html)
 	if err != nil {
-		s.dumpChunks("html", html)
+		s.logger().Warnf("[Captcha] page parse failed: %v; pow script near: %s", err, powSnippet(html))
 		return "", err
 	}
 
@@ -215,18 +202,10 @@ func (s *captchaSession) solveOnce(captchaErr *Error) (string, error) {
 	// Ранний выход не оставляет догрузку в фоне следующей попытке.
 	defer func() { <-assetsDone }()
 
-	s.logger().Debugf("[Captcha] solving pow difficulty=%d assets=%d", page.PowDifficulty, len(assets))
-	powHash, powNonce := solveCaptchaPoW(s.ctx, page.PowInput, page.PowDifficulty)
-	if powHash == "" {
-		return "", errors.New("captcha pow failed")
-	}
-	s.powHash, err = encodePowResult(page.PowPrefix, powResult{
-		Hash:       powHash,
-		Nonce:      powNonce,
-		DurationMs: powDurationMs(powNonce),
-	})
+	s.logger().Debugf("[Captcha] solving pow difficulty=%d assets=%d", page.Pow.Difficulty, len(assets))
+	s.powHash, err = s.powEnvelope(page.Pow)
 	if err != nil {
-		return "", fmt.Errorf("captcha pow encode: %w", err)
+		return "", err
 	}
 
 	s.debugInfo, err = s.resolveDebugInfo(page.ScriptURL)
@@ -317,6 +296,18 @@ func (s *captchaSession) escalate(sessionToken string, initContent captchaConten
 		return "", err
 	}
 	return s.solveSliderCaptcha(sessionToken, content)
+}
+
+// clickReaction - пауза перед check: столько посетитель смотрит на виджет до
+// нажатия. Медиана держится у живого эталона (3-4 тика телеметрии при
+// sensors_delay=200мс), редкий хвост - на замешкавшегося; фиксированное окно
+// само по себе отпечаток.
+func (s *captchaSession) clickReaction() error {
+	ms := 450 + randx.Intn(500)
+	if randx.Intn(4) == 0 {
+		ms += 700 + randx.Intn(1800)
+	}
+	return s.sleepFor(time.Duration(ms) * time.Millisecond)
 }
 
 // dwell - пауза [minMs, maxMs): массивы телеметрии обязаны биться с реальным
@@ -456,48 +447,27 @@ func (s *captchaSession) fetchDebugInfoJS(scriptURL string) (string, error) {
 	return v, nil
 }
 
-func (s *captchaSession) dumpChunks(label, body string) {
-	const chunk = 1800
-	total := (len(body) + chunk - 1) / chunk
-	l := s.logger()
-	l.Debugf("[Captcha][DUMP] %s bytes=%d chunks=%d", label, len(body), total)
-	for i := range total {
-		start := i * chunk
-		end := min(start+chunk, len(body))
-		l.Debugf("[Captcha][DUMP %s %d/%d] %s", label, i+1, total, body[start:end])
-	}
-}
-
 func parseCaptchaPage(html string) (*captchaPage, error) {
-	page := &captchaPage{}
-
+	pow, err := parsePowParams(html)
+	if err != nil {
+		return nil, err
+	}
+	page := &captchaPage{Pow: pow, Init: parseCaptchaInitGlobal(html)}
 	if m := reCaptchaScriptSrc.FindStringSubmatch(html); len(m) >= 2 {
 		page.ScriptURL = m[1]
 	}
-
-	m := reCaptchaPowInput.FindStringSubmatch(html)
-	if len(m) < 2 {
-		return nil, errors.New("captcha powInput not found")
-	}
-	page.PowInput = m[1]
-
-	dm := reCaptchaDifficulty.FindStringSubmatch(html)
-	if len(dm) < 2 {
-		return nil, errors.New("captcha difficulty const not found")
-	}
-	difficulty, err := strconv.Atoi(dm[1])
-	if err != nil || difficulty <= 0 {
-		return nil, fmt.Errorf("invalid captcha difficulty %q", dm[1])
-	}
-	page.PowDifficulty = difficulty
-
-	pm := reCaptchaPowResult.FindStringSubmatch(html)
-	if len(pm) < 2 {
-		return nil, errors.New("captcha pow result envelope not recognized")
-	}
-	page.PowPrefix = pm[1]
-	page.Init = parseCaptchaInitGlobal(html)
 	return page, nil
+}
+
+// powSnippet - окно вокруг конверта PoW: при следующей смене разметки этого
+// хватает, чтобы увидеть новый формат, не выгружая страницу целиком.
+func powSnippet(html string) string {
+	const window = 400
+	i := strings.Index(html, "captchaPowResult")
+	if i < 0 {
+		return "<no captchaPowResult on page>"
+	}
+	return html[max(i-window, 0):min(i+window, len(html))]
 }
 
 // parseCaptchaInitGlobal вынимает window.init - серверный дамп, из которого
@@ -615,7 +585,8 @@ func (s *captchaSession) performCaptchaCheck(
 	answerJSON string,
 ) (*captchaCheck, error) {
 	s.checked = true
-	data := buildAnalytics(s.sensors, s.downlink, time.Since(s.sensorsStart))
+	sinceSettings := time.Since(s.sensorsStart)
+	data := buildAnalytics(s.sensors, s.downlink, sinceSettings)
 	values := make([][2]string, 0, 15)
 	values = append(values,
 		[2]string{"session_token", sessionToken},
@@ -634,8 +605,8 @@ func (s *captchaSession) performCaptchaCheck(
 	if err != nil {
 		return nil, fmt.Errorf("captcha check failed: %w", err)
 	}
-	s.logger().Debugf("[Captcha] check payload answer_bytes=%d downlink_samples=%d",
-		len(answerJSON), len(data.connDownlink))
+	s.logger().Debugf("[Captcha] check payload answer_bytes=%d downlink_samples=%d since_settings=%s",
+		len(answerJSON), len(data.connDownlink), sinceSettings.Truncate(time.Millisecond))
 	check, err := parseCaptchaCheck(resp)
 	if err != nil {
 		return nil, err
@@ -685,7 +656,7 @@ func (s *captchaSession) solveCheckboxCaptcha(sessionToken string) (string, erro
 		return "", err
 	}
 
-	if err := s.dwell(350, 550); err != nil {
+	if err := s.clickReaction(); err != nil {
 		return "", err
 	}
 
@@ -709,43 +680,6 @@ func (s *captchaSession) solveCheckboxCaptcha(sessionToken string) (string, erro
 		return "", errors.New("captcha success token not found")
 	}
 	return check.SuccessToken, nil
-}
-
-func solveCaptchaPoW(ctx context.Context, input string, difficulty int) (string, int) {
-	if input == "" || difficulty <= 0 {
-		return "", 0
-	}
-	target := strings.Repeat("0", difficulty)
-	buf := make([]byte, 0, len(input)+20)
-	buf = append(buf, input...)
-	for nonce := 0; nonce <= 10_000_000; nonce++ {
-		if nonce&1023 == 0 {
-			select {
-			case <-ctx.Done():
-				return "", 0
-			default:
-			}
-		}
-		buf = strconv.AppendInt(buf[:len(input)], int64(nonce), 10)
-		sum := sha256.Sum256(buf)
-		hashHex := hex.EncodeToString(sum[:])
-		if strings.HasPrefix(hashHex, target) {
-			return hashHex, nonce
-		}
-	}
-	return "", 0
-}
-
-func powDurationMs(nonce int) int64 {
-	return max(1, int64(math.Round(float64(nonce+1)*0.015)))
-}
-
-func encodePowResult(prefix string, r powResult) (string, error) {
-	data, err := json.Marshal(r)
-	if err != nil {
-		return "", err
-	}
-	return prefix + base64.StdEncoding.EncodeToString(data), nil
 }
 
 func (s *captchaSession) doRaw(
@@ -781,7 +715,7 @@ func (s *captchaSession) doRaw(
 	start := time.Now()
 	resp, err := s.client.Do(req)
 	if err != nil {
-		s.logger().Debugf("[Captcha] http %s %s failed after=%s form=%s err=%v", method, captchaSafeURL(endpoint), time.Since(start).Truncate(time.Millisecond), captchaFormSummary(form), err)
+		s.logger().Debugf("[Captcha] http %s %s failed t=%s after=%s %s form=%s err=%v", method, SafeURL(endpoint), s.elapsed(), time.Since(start).Truncate(time.Millisecond), navSummary(req), captchaFormSummary(form), err)
 		return nil, err
 	}
 	defer func() {
@@ -790,8 +724,33 @@ func (s *captchaSession) doRaw(
 		}
 	}()
 	data, readErr := io.ReadAll(resp.Body)
-	s.logger().Debugf("[Captcha] http %s %s status=%d bytes=%d after=%s form=%s", method, captchaSafeURL(endpoint), resp.StatusCode, len(data), time.Since(start).Truncate(time.Millisecond), captchaFormSummary(form))
+	s.logger().Debugf("[Captcha] http %s %s status=%d bytes=%d t=%s after=%s %s form=%s", method, SafeURL(endpoint), resp.StatusCode, len(data), s.elapsed(), time.Since(start).Truncate(time.Millisecond), navSummary(req), captchaFormSummary(form))
 	return data, readErr
+}
+
+// Навигационный контекст: с какой страницы виджет якобы ходит в API. Формат
+// общий с manual-прокси - эти две строки диффают между собой.
+func NavSummary(dest, site, ref string) string {
+	return fmt.Sprintf("dest=%s site=%s ref=%s", orDash(dest), orDash(site), SafeURL(ref))
+}
+
+func navSummary(req *fhttp.Request) string {
+	return NavSummary(
+		req.Header.Get("Sec-Fetch-Dest"),
+		req.Header.Get("Sec-Fetch-Site"),
+		req.Header.Get("Referer"))
+}
+
+func orDash(v string) string {
+	if v == "" {
+		return "-"
+	}
+	return v
+}
+
+// Смещение от старта решения - по абсолютному времени не видно, укладывается ли captcha в полсекунды.
+func (s *captchaSession) elapsed() string {
+	return "+" + time.Since(s.started).Truncate(time.Millisecond).String()
 }
 
 func (s *captchaSession) dumpExchange(req *fhttp.Request, body []byte) {
@@ -838,19 +797,30 @@ func captchaMapKeys(m map[string]any) string {
 	return strings.Join(keys, ",")
 }
 
-func captchaSafeURL(raw string) string {
+// SafeURL - host+path и имена query-параметров без значений: в значениях едет
+// session_token, а различие страниц (variant, blank, expired_at) видно и по ключам.
+func SafeURL(raw string) string {
+	if raw == "" {
+		return "-"
+	}
 	u, err := neturl.Parse(raw)
 	if err != nil {
 		return "<invalid-url>"
-	}
-	if u.Host == "" {
-		return u.Path
 	}
 	path := u.EscapedPath()
 	if path == "" {
 		path = "/"
 	}
-	return u.Host + path
+	out := u.Host + path
+	if q := u.Query(); len(q) > 0 {
+		keys := make([]string, 0, len(q))
+		for k := range q {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		out += "?" + strings.Join(keys, ",")
+	}
+	return out
 }
 
 func captchaFormSummary(values [][2]string) string {

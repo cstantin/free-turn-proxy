@@ -11,6 +11,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/captcha"
 	manualcaptcha "github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/captcha/manual"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/vkauth"
+	"github.com/samosvalishe/free-turn-proxy/internal/statedir"
 )
 
 type Config struct {
@@ -38,6 +39,14 @@ type Config struct {
 	// FingerprintSeed - стабильный идентификатор установки; пустой -> личность
 	// случайная на запуск. Не сеять от Link: раздаваемая ссылка общая для всех.
 	FingerprintSeed string
+
+	// StatePaths - кандидаты файла состояния персоны (см. DefaultStatePaths);
+	// пустые -> поколение персоны не переживает перезапуск.
+	StatePaths []string
+
+	// CredsPaths - кандидаты файла с кэшем TURN-реквизитов (см. DefaultCredsPaths);
+	// пустые -> каждый запуск процесса проходит VK-цепочку заново.
+	CredsPaths []string
 
 	// Log - уровневый логгер. nil -> no-op.
 	Log logx.Logger
@@ -74,10 +83,16 @@ func New(cfg Config, solver ManualSolverFunc) (*Provider, error) {
 		StreamsAlive:    cfg.StreamsAlive,
 		ManualSolver:    solver,
 		FingerprintSeed: cfg.FingerprintSeed,
+		StatePaths:      cfg.StatePaths,
+		CredsPaths:      cfg.CredsPaths,
 		Log:             cfg.Log,
 	})
 	return &Provider{link: cfg.Link, auth: auth}, nil
 }
+
+func DefaultStatePaths() []string { return statedir.Paths(vkauth.PersonaStateFile) }
+
+func DefaultCredsPaths() []string { return statedir.Paths(vkauth.CredsStateFile) }
 
 func (p *Provider) GetCredentials(ctx context.Context, streamID int) (provider.Credentials, error) {
 	user, pass, addrs, err := p.auth.GetCredentials(ctx, p.link, streamID)

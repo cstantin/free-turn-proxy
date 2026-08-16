@@ -26,6 +26,15 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 
 	c.log.Infof("[STREAM %d] [VK Auth] Connecting Identity - Name: %s | User-Agent: %s", streamID, name, profile.UserAgent)
 
+	// Шаг 0: открыть саму ссылку (не критично) - до неё у посетителя нет ни кук, ни повода звать API.
+	if pageErr := c.openJoinPage(ctx, httpClient, profile, link); pageErr != nil {
+		c.log.Warnf("[STREAM %d] [VK Auth] join page warm-up failed: %v", streamID, pageErr)
+	}
+
+	if delayErr := vkDelayRandom(ctx, 300, 600); delayErr != nil {
+		return "", "", nil, delayErr
+	}
+
 	// Шаг 1: анонимный app-токен.
 	token1, err := c.fetchAnonToken(ctx, httpClient, profile, creds)
 	if err != nil {
