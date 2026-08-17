@@ -84,6 +84,8 @@ func (s *captchaSession) solveSliderCaptcha(
 		if err != nil {
 			return "", err
 		}
+		// Протяжка ручки: координаты никуда не уходят, но время сессии задаёт
+		// длину массивов телеметрии.
 		if dragErr := s.dwell(650, 1750); dragErr != nil {
 			return "", dragErr
 		}
@@ -103,6 +105,7 @@ func (s *captchaSession) solveSliderCaptcha(
 		if strings.EqualFold(check.Status, "error_limit") {
 			return "", errCaptchaRateLimit
 		}
+		// Виджет показал ошибку - человеку нужно время, чтобы это осознать.
 		if dwellErr := s.dwell(700, 1600); dwellErr != nil {
 			return "", dwellErr
 		}
@@ -170,6 +173,7 @@ func splitSliderSteps(steps []int) (int, []int, int, error) {
 	tail := append([]int(nil), steps[1:]...)
 	attempts := 4
 	if len(tail)%2 != 0 {
+		// Штатный формат: [size, ...пары свапов, attempts].
 		attempts = tail[len(tail)-1]
 		tail = tail[:len(tail)-1]
 		Log.Debugf("[Captcha] slider attempts from payload=%d", attempts)
@@ -214,6 +218,7 @@ func rankSliderGuesses(img image.Image, gridSize int, swaps []int) ([]sliderGues
 		lumaRank[g.Index] = rank
 	}
 
+	// Второй проход тяжелее первого - считаем параллельно, каждый в свою ячейку.
 	errs := make([]error, candidateCount)
 	var wg sync.WaitGroup
 	for i := range guesses {
@@ -273,6 +278,8 @@ func rankSliderGuesses(img image.Image, gridSize int, swaps []int) ([]sliderGues
 	return guesses, nil
 }
 
+// pickSliderAttempts разносит попытки по номеру кандидата: соседние отличаются
+// одним свапом и промахиваются вместе.
 func pickSliderAttempts(guesses []sliderGuess, limit int) []sliderGuess {
 	const minGap = 3
 	out := make([]sliderGuess, 0, limit)

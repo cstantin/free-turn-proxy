@@ -17,6 +17,9 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/browserprofile"
 )
 
+// PoW-скрипт страницы обфусцирован, имена переменных генерируются заново на каждый
+// релиз. Стабильны только аргументы IIFE (input, difficulty, метка ошибки) и
+// префикс версии конверта.
 var (
 	rePowArgs   = regexp.MustCompile(`\}\(\s*["']([A-Za-z0-9_-]{8,})["']\s*,\s*(\d+)\s*,\s*["'][^"']*["']\s*\)\s*\)`)
 	rePowPrefix = regexp.MustCompile(`captchaPowResult["'\]]{0,3}\s*=\s*["']([A-Za-z0-9._-]{0,8})["']\s*\+`)
@@ -28,6 +31,8 @@ type powParams struct {
 	Prefix     string
 }
 
+// powResult - конверт window.captchaPowResult: виджету уходит не голый хэш.
+// Порядок полей повторяет порядок ключей у JSON.stringify страницы.
 type powResult struct {
 	Hash       string          `json:"hash"`
 	Nonce      int             `json:"nonce"`
@@ -75,11 +80,12 @@ func (s *captchaSession) powEnvelope(p powParams) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("captcha pow encode: %w", err)
 	}
+	// Печатаем до base64: диффать с живым браузером (см. DecodePowEnvelope) иначе нечем.
 	s.logger().Debugf("[Captcha] pow envelope: %s", envelope)
 	return p.Prefix + base64.StdEncoding.EncodeToString(envelope), nil
 }
 
-// DecodePowEnvelope декодирует строку window.captchaPowResult в JSON.
+// DecodePowEnvelope разворачивает значение window.captchaPowResult обратно в JSON.
 func DecodePowEnvelope(value string) string {
 	payload := value
 	if _, rest, ok := strings.Cut(value, "."); ok {
@@ -117,10 +123,13 @@ func solvePoW(ctx context.Context, input string, difficulty int) (string, int) {
 	return "", 0
 }
 
+// Цикл в браузере синхронный: nonce 53 -> 1 мс, 267 -> 4 мс.
 func powDurationMs(nonce int) int64 {
 	return max(1, int64(math.Round(float64(nonce+1)*0.015)))
 }
 
+// telemetryHash повторяет канонизатор страницы: ключи по алфавиту (map в Go
+// сортирует их сам), undefined на нашей стороне не бывает.
 func telemetryHash(telemetry []byte) (string, error) {
 	var v any
 	if err := json.Unmarshal(telemetry, &v); err != nil {
@@ -134,6 +143,7 @@ func telemetryHash(telemetry []byte) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+// marshalJS - JSON без HTML-экранирования: JSON.stringify не трогает < > &.
 func marshalJS(v any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -144,6 +154,8 @@ func marshalJS(v any) ([]byte, error) {
 	return bytes.TrimRight(buf.Bytes(), "\n"), nil
 }
 
+// powTelemetryData - пробы PoW-скрипта; порядок полей = порядок проб, так их
+// пишет JSON.stringify.
 type powTelemetryData struct {
 	Globals         powProbe `json:"globals"`
 	UA              powProbe `json:"ua"`
@@ -219,6 +231,7 @@ type powNativeIntegrity struct {
 	XHRNative  bool `json:"xhrNative"`
 }
 
+// Chrome отдаёт пять фиктивных PDF-плагинов везде, где умеет показывать PDF.
 var chromePDFPlugins = []string{
 	"PDF Viewer",
 	"Chrome PDF Viewer",
@@ -227,8 +240,12 @@ var chromePDFPlugins = []string{
 	"WebKit built-in PDF",
 }
 
+// powTelemetry описывает страницу такой, какой её видел бы браузер персоны:
+// страницу мы тянем верхнеуровневой навигацией (Sec-Fetch-Dest: document),
+// поэтому frame и referrer описывают top-level документ - врозь их менять нельзя.
 func (s *captchaSession) powTelemetry() powTelemetryData {
 	p := s.profile
+	// На Android нет встроенного PDF-вьювера, значит и списка плагинов.
 	plugins := powPlugins{Names: []string{}}
 	if !p.IsMobile() {
 		plugins = powPlugins{Length: len(chromePDFPlugins), Names: chromePDFPlugins, IsChrome: true}
@@ -256,6 +273,7 @@ func (s *captchaSession) powTelemetry() powTelemetryData {
 	}
 }
 
+// prefers-color-scheme у живого посетителя не скачет между сессиями - берём бит персоны.
 func prefersDark(p browserprofile.Profile) bool {
 	return len(p.VisitorID) > 0 && p.VisitorID[0]%2 == 1
 }

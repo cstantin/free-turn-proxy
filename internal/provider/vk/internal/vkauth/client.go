@@ -29,7 +29,6 @@ type Config struct {
 	Platform        browserprofile.Platform
 	FingerprintSeed string
 	StatePaths      []string
-	CredsPaths      []string
 	Log             logx.Logger
 }
 
@@ -44,7 +43,6 @@ type Client struct {
 	log         logx.Logger
 
 	store *Store
-	creds credsStore
 
 	lockout atomic.Int64
 
@@ -73,7 +71,6 @@ func New(cfg Config) *Client {
 		manualSolve: cfg.ManualSolver,
 		log:         cfg.Log,
 		store:       NewStore(cfg.StreamsPerCache),
-		creds:       credsStore{paths: cfg.CredsPaths},
 	}
 	if len(c.credentials) == 0 {
 		c.credentials = DefaultCredentials
@@ -142,13 +139,6 @@ func (c *Client) GetCredentials(ctx context.Context, link string, streamID int) 
 		return cache.creds.Username, cache.creds.Password, orderAddrs(cache.creds.ServerAddrs, streamID), nil
 	}
 
-	if restored, ok := c.creds.load(link, cacheID); ok {
-		cache.creds = restored
-		c.log.Infof("[STREAM %d] [VK Auth] Credentials restored from state (cache=%d, expires in %v)",
-			streamID, cacheID, time.Until(restored.ExpiresAt).Truncate(time.Second))
-		return restored.Username, restored.Password, orderAddrs(restored.ServerAddrs, streamID), nil
-	}
-
 	user, pass, addrs, err := c.fetchSerialized(ctx, link, streamID)
 	if err != nil {
 		return "", "", nil, err
@@ -161,7 +151,6 @@ func (c *Client) GetCredentials(ctx context.Context, link string, streamID int) 
 		ExpiresAt:   time.Now().Add(CredentialLifetime - CacheSafetyMargin).Round(0),
 		Link:        link,
 	}
-	c.creds.save(cacheID, cache.creds)
 	return user, pass, orderAddrs(addrs, streamID), nil
 }
 
@@ -192,10 +181,6 @@ func (c *Client) HandleAuthError(streamID int) bool {
 
 	if count >= MaxCacheErrors {
 		c.log.Warnf("[VK Auth] Multiple auth errors (%d), invalidating cache %d for stream %d", count, cacheID, streamID)
-		cache.mutex.RLock()
-		link := cache.creds.Link
-		cache.mutex.RUnlock()
-		c.creds.drop(link, cacheID)
 		cache.Invalidate()
 		c.log.Warnf("[STREAM %d] [VK Auth] Credentials cache invalidated", streamID)
 		return true
