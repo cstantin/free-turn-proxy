@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func u8(v int) byte { return byte(v) }
+func u8(v int) byte { return byte(v & 0xFF) }
 
 func buildClientHello(host string) []byte {
 	hn := []byte(host)

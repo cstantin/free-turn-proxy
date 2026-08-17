@@ -336,7 +336,7 @@ func (s *Session) relay(ctx context.Context, prov provider.Provider, peer *net.U
 		return err
 	}
 	if s.deps.LocalPipe == nil {
-		defer local.Close()
+		defer func() { _ = local.Close() }()
 	}
 
 	dialer := &dtlsdial.Dialer{

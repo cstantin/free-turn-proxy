@@ -147,8 +147,8 @@ func TestSinglePeerBindReopenAfterClose(t *testing.T) {
 	}
 
 	in := []byte("response")
-	if _, err := relay.WriteTo(in, nil); err != nil {
-		t.Fatal(err)
+	if _, writeErr := relay.WriteTo(in, nil); writeErr != nil {
+		t.Fatalf("relay.WriteTo: %v", writeErr)
 	}
 	packets := [][]byte{make([]byte, 64)}
 	sizes := make([]int, 1)

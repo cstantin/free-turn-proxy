@@ -161,7 +161,8 @@ func oneDTLS(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 			if addr == nil {
 				continue
 			}
-			if _, err = listenConn.WriteTo(buf[:n], addr.(net.Addr)); err != nil {
+			_, writeErr := listenConn.WriteTo(buf[:n], addr.(net.Addr))
+			if writeErr != nil {
 				return
 			}
 		}
