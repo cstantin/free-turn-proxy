@@ -1,5 +1,41 @@
 # Changelog
 
+## [3.0.0](https://github.com/samosvalishe/free-turn-proxy/compare/v2.1.2...v3.0.0) (2026-08-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* флаги -mode и -bond удалены; конфиги и ссылки freeturn:// с tcp-режимом больше не принимаются.
+
+### Features
+
+* comment cleanup ([648c554](https://github.com/samosvalishe/free-turn-proxy/commit/648c55415b210eb0feea640e0a9f444b1fa07954))
+* **mobile:** переживание сна и рестарта на Android ([681dde8](https://github.com/samosvalishe/free-turn-proxy/commit/681dde8a6d98ccab10a2aa9eb865e5b3eaf86595))
+
+
+### Bug Fixes
+
+* **captcha:** персонная модель PoW и кэш TURN-кредов ([6b14a95](https://github.com/samosvalishe/free-turn-proxy/commit/6b14a95434b31bf505ed02c6764d0b2fce7c5351))
+* **captcha:** устранение регрессий ([5b5c93f](https://github.com/samosvalishe/free-turn-proxy/commit/5b5c93fae16dfcaa3de7b125ce34c0991180b831))
+* readme ([d208a0d](https://github.com/samosvalishe/free-turn-proxy/commit/d208a0d3df5546ea883662d36b457df980cc416a))
+* soft reconnect on network handover without tunnel drop ([0bef2e8](https://github.com/samosvalishe/free-turn-proxy/commit/0bef2e8ab5cd7c3db3e8ff5f3ee9c8ae67f80832))
+* **udprelay:** рецикл аллокации на простое туннеля ([a033cfb](https://github.com/samosvalishe/free-turn-proxy/commit/a033cfb9a2097365e144fa79a55ecaf12dc07c3e))
+* **vkauth:** ловим 486 как auth-error для рецикла аллокации ([5fdd8c3](https://github.com/samosvalishe/free-turn-proxy/commit/5fdd8c31123f5bcbe9ba4fa2677b604bc6da9294))
+* возврат фонового детектора сна для рецикла аллокаций ([53b8345](https://github.com/samosvalishe/free-turn-proxy/commit/53b8345aa07dd4375ba5646a3f14a309351bb147))
+* убрал лишний артефакт ([6bc4faf](https://github.com/samosvalishe/free-turn-proxy/commit/6bc4faf9423be9278f46642fbf29ee92bb46b5d3))
+* устранение предупреждений линтера ([49eecb3](https://github.com/samosvalishe/free-turn-proxy/commit/49eecb34784017e01d8077e8bbe178ed9c0ba023))
+* устранение предупреждений линтера ([65bc8a8](https://github.com/samosvalishe/free-turn-proxy/commit/65bc8a89932bcbc5cdc27163adc46cf118428901))
+
+
+### Performance
+
+* меньше фоновых таймеров при поднятом туннеле и опрос метрик только при видимом окне ([3cf7831](https://github.com/samosvalishe/free-turn-proxy/commit/3cf78316df14425e3811caaf483bf92eebe52cfc))
+
+
+### Breaking Changes
+
+* выпил tcp-режим туннеля ([74241de](https://github.com/samosvalishe/free-turn-proxy/commit/74241de764a428d9c3fee1aeae0d917851d1d542))
+
 ## [2.1.2](https://github.com/samosvalishe/free-turn-proxy/compare/v2.1.1...v2.1.2) (2026-08-14)
 
 
