@@ -78,5 +78,6 @@ func IsAuthError(err error) bool {
 		strings.Contains(s, "Unauthorized") ||
 		strings.Contains(s, "authentication") ||
 		strings.Contains(s, "invalid credential") ||
-		strings.Contains(s, "stale nonce")
+		strings.Contains(s, "stale nonce") ||
+		strings.Contains(s, "486")
 }

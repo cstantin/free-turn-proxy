@@ -31,13 +31,14 @@ func TestIsAuthError(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]bool{
-		"401 Unauthorized":        true,
-		"alloc failed: 401":       true,
-		"stale nonce":             true,
-		"invalid credential":      true,
-		"authentication required": true,
-		"connection refused":      false,
-		"":                        false,
+		"401 Unauthorized":              true,
+		"alloc failed: 401":             true,
+		"stale nonce":                   true,
+		"invalid credential":            true,
+		"authentication required":       true,
+		"486: Allocation Quota Reached": true,
+		"connection refused":            false,
+		"":                              false,
 	}
 	for msg, want := range cases {
 		got := IsAuthError(errors.New(msg))
