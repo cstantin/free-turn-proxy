@@ -32,7 +32,7 @@ task                # список доступных задач
 task build          # собрать client + server в dist/ для текущего хоста
 task build:all      # кросс-сборка всех target через goreleaser snapshot
 task build:ios      # сборка XCFramework для iOS в dist/Mobile.xcframework
-task build:android  # сборка AAR архива для Android в dist/mobile.aar
+task build:android  # сборка AAR архива для Android в dist/freeturn.aar
 task test           # go test -race
 task test:cover     # тесты + покрытие -> cover.html
 task lint           # golangci-lint
