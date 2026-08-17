@@ -46,14 +46,15 @@ func DTLSLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 }
 
 // TURNLoop управляет жизненным циклом одной TURN-аллокации.
-func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, connchan <-chan net.PacketConn, t <-chan time.Time, streamID int) {
+func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, connchan <-chan net.PacketConn, streamID int) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case conn2 := <-connchan:
+			// Джиттер разводит Allocate соседних стримов во времени.
 			select {
-			case <-t:
+			case <-time.After(time.Duration(randx.Intn(400)+100) * time.Millisecond):
 			case <-ctx.Done():
 				return
 			}
@@ -250,6 +251,11 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 			deps.log().Warnf("[STREAM %d] Пробуждение устройства - рецикл allocation", streamID)
 			turncancel()
 		}
+		// conn2 молчит, пока приложение не шлёт: без дедлайна его читатель досидел бы
+		// до первого пакета, а рецикл на простое висел бы вечно (тоннель без трафика)
+		if err := conn2.SetDeadline(time.Now()); err != nil {
+			deps.log().Errorf("[STREAM %d] Failed to set pipe deadline: %s", streamID, err)
+		}
 	})
 
 	wg.Go(func() {
@@ -340,5 +346,9 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 	wg.Wait()
 	if err := relayConn.SetDeadline(time.Time{}); err != nil {
 		deps.log().Errorf("Failed to clear relay deadline: %s", err)
+	}
+	// conn2 достаётся следующей аллокации - с истёкшим дедлайном она читала бы пустоту
+	if err := conn2.SetDeadline(time.Time{}); err != nil {
+		deps.log().Errorf("Failed to clear pipe deadline: %s", err)
 	}
 }
