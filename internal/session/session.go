@@ -19,7 +19,6 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/routemgr"
 	"github.com/samosvalishe/free-turn-proxy/internal/stats"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
-	"github.com/samosvalishe/free-turn-proxy/internal/wake"
 )
 
 // Phase - текущая стадия подключения сессии.
@@ -40,14 +39,9 @@ var (
 )
 
 const (
-	defaultStatusInterval       = 2 * time.Second
+	defaultStatusInterval       = 500 * time.Millisecond
 	defaultUDPHandshakeTimeout  = 20 * time.Second
 	defaultHandshakeConcurrency = 3
-
-	// Порог вдвое больше тика: сон короче порога всё равно пропускаем, а тик почаще
-	// стоил бы пробуждений процесса на всё время сессии.
-	wakeTick      = 30 * time.Second
-	wakeThreshold = 60 * time.Second
 )
 
 type Options struct {
@@ -110,10 +104,10 @@ type Session struct {
 	total   int
 	traffic *traffic
 
-	connected atomic.Int32
-	status    atomic.Pointer[statusInfo]
-	started   atomic.Bool
-	wake      *wake.Notifier
+	connected   atomic.Int32
+	status      atomic.Pointer[statusInfo]
+	started     atomic.Bool
+	reconnectCh chan struct{}
 }
 
 func New(cfg *config.Client, deps Deps) (*Session, error) {
@@ -127,11 +121,11 @@ func New(cfg *config.Client, deps Deps) (*Session, error) {
 	total := cfg.TURN.N * max(len(cfg.VK.Links), 1)
 
 	s := &Session{
-		cfg:   cfg,
-		deps:  deps,
-		opts:  deps.Options.withDefaults(),
-		total: total,
-		wake:  wake.New(),
+		cfg:         cfg,
+		deps:        deps,
+		opts:        deps.Options.withDefaults(),
+		total:       total,
+		reconnectCh: make(chan struct{}, 1),
 	}
 	if s.opts.Traffic {
 		s.traffic = newTraffic()
@@ -181,18 +175,12 @@ func (s *Session) Run(ctx context.Context) (err error) {
 	defer cancel()
 
 	var bg sync.WaitGroup
-	bg.Go(func() {
-		s.wake.Watch(runCtx, wakeTick, wakeThreshold, func(gap time.Duration) {
-			log.Warnf("device slept for %s - recycling TURN allocations", gap.Truncate(time.Second))
-		})
-	})
-
 	var watchdogErr error
 	bg.Go(func() {
 		watchdogErr = s.watch(runCtx, cancel)
 	})
 
-	relayErr := s.relay(runCtx, prov, peer)
+	relayErr := s.runRelayLoop(runCtx, prov, peer)
 	stopped := runCtx.Err() != nil
 	cancel()
 	bg.Wait()
@@ -203,8 +191,37 @@ func (s *Session) Run(ctx context.Context) (err error) {
 	return watchdogErr
 }
 
-// Wake инициирует немедленное переподключение TURN-аллокаций после пробуждения.
-func (s *Session) Wake() { s.wake.Fire() }
+func (s *Session) runRelayLoop(ctx context.Context, prov provider.Provider, peer *net.UDPAddr) error {
+	for {
+		attemptCtx, attemptCancel := context.WithCancel(ctx)
+		done := make(chan error, 1)
+		go func() { done <- s.relay(attemptCtx, prov, peer) }()
+
+		var err error
+		select {
+		case err = <-done:
+		case <-s.reconnectCh:
+			attemptCancel()
+			err = <-done
+		}
+		attemptCancel()
+
+		if ctx.Err() != nil {
+			return err
+		}
+		if err != nil && !errors.Is(err, context.Canceled) {
+			return err
+		}
+	}
+}
+
+// Wake форсирует чистый перезапуск relay (например, при смене сети), не трогая сам туннель.
+func (s *Session) Wake() {
+	select {
+	case s.reconnectCh <- struct{}{}:
+	default:
+	}
+}
 
 // Snapshot возвращает текущий снимок состояния сессии.
 func (s *Session) Snapshot() Snapshot {
@@ -305,6 +322,9 @@ func (s *Session) relay(ctx context.Context, prov provider.Provider, peer *net.U
 	if err != nil {
 		return err
 	}
+	if s.deps.LocalPipe == nil {
+		defer local.Close()
+	}
 
 	dialer := &dtlsdial.Dialer{
 		HandshakeTimeout: s.opts.UDPHandshakeTimeout,
@@ -321,7 +341,7 @@ func (s *Session) relay(ctx context.Context, prov provider.Provider, peer *net.U
 		ClientID:     s.cfg.ClientID,
 		TrafficStats: s.trafficStats(),
 	}
-	return udprelay.Run(ctx, dialer, prov, log, &s.connected, routeCallback, s.wake, params, peer, local, s.total)
+	return udprelay.Run(ctx, dialer, prov, log, &s.connected, routeCallback, params, peer, local, s.total)
 }
 
 func (s *Session) localConn(ctx context.Context) (net.PacketConn, error) {

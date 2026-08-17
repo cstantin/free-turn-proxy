@@ -278,7 +278,6 @@ func startLocked(configJSON string, tunFD int, withTunnel bool) error {
 		}
 	}
 
-	ClearLogs()
 	ctx, cancel := context.WithCancel(context.Background())
 	l := &live{
 		sess:   sess,

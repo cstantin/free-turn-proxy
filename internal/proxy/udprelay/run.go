@@ -12,7 +12,6 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/stats"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
-	"github.com/samosvalishe/free-turn-proxy/internal/wake"
 )
 
 // AuthHandler определяет интерфейс взаимодействия с провайдером при ошибках авторизации.
@@ -48,7 +47,6 @@ type Deps struct {
 	ActiveLocalPeer  *atomic.Value
 	ConnectedStreams *atomic.Int32
 	OnTURNServer     func(ip net.IP)
-	Wake             *wake.Notifier
 	fatalCh          chan error
 }
 
@@ -59,13 +57,11 @@ func (d *Deps) log() logx.Logger {
 	return d.Log
 }
 
-func (d *Deps) woke() <-chan struct{} { return d.Wake.Chan() }
-
 // Run запускает прием входящего UDP-трафика и распределяет его по пулу пар DTLSLoop/TURNLoop.
-func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, logger logx.Logger, connectedStreams *atomic.Int32, onTURNServer func(net.IP), waker *wake.Notifier, params *Params, peer *net.UDPAddr, listenConn net.PacketConn, numStreams int) error {
+func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, logger logx.Logger, connectedStreams *atomic.Int32, onTURNServer func(net.IP), params *Params, peer *net.UDPAddr, listenConn net.PacketConn, numStreams int) error {
 	context.AfterFunc(ctx, func() {
-		if closeErr := listenConn.Close(); closeErr != nil {
-			logger.Errorf("udprelay: close local connection: %s", closeErr)
+		if err := listenConn.SetReadDeadline(time.Now()); err != nil {
+			logger.Errorf("udprelay: set listen deadline: %s", err)
 		}
 	})
 
@@ -82,7 +78,6 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 		ActiveLocalPeer:  &activeLocalPeer,
 		ConnectedStreams: connectedStreams,
 		OnTURNServer:     onTURNServer,
-		Wake:             waker,
 		fatalCh:          fatalCh,
 	}
 
@@ -137,6 +132,11 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 	}()
 
 	wg.Wait()
+	// Сбрасываем дедлайн, чтобы listenConn можно было переиспользовать
+	// в следующей итерации runRelayLoop (актуально для LocalPipe).
+	if err := listenConn.SetReadDeadline(time.Time{}); err != nil {
+		logger.Errorf("udprelay: clear listen deadline: %s", err)
+	}
 	runCancel()
 	<-watcherDone
 	if p := fatalErr.Load(); p != nil {

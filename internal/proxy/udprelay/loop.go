@@ -37,7 +37,6 @@ func DTLSLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 				select {
 				case <-ctx.Done():
 					return
-				case <-deps.woke():
 				case <-time.After(time.Duration(10+randx.Intn(20)) * time.Second):
 				}
 			}
@@ -246,9 +245,6 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		case <-turnctx.Done():
 		case <-stream.PermDead:
 			deps.log().Warnf("[STREAM %d] TURN channel-bind умер - рецикл allocation", streamID)
-			turncancel()
-		case <-deps.woke():
-			deps.log().Warnf("[STREAM %d] Пробуждение устройства - рецикл allocation", streamID)
 			turncancel()
 		}
 		// conn2 молчит, пока приложение не шлёт: без дедлайна его читатель досидел бы
