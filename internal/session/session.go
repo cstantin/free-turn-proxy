@@ -19,6 +19,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/routemgr"
 	"github.com/samosvalishe/free-turn-proxy/internal/stats"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
+	"github.com/samosvalishe/free-turn-proxy/internal/wake"
 )
 
 // Phase - текущая стадия подключения сессии.
@@ -42,6 +43,11 @@ const (
 	defaultStatusInterval       = 500 * time.Millisecond
 	defaultUDPHandshakeTimeout  = 20 * time.Second
 	defaultHandshakeConcurrency = 3
+
+	// Порог вдвое больше тика: сон короче порога всё равно пропускаем, а тик почаще
+	// стоил бы пробуждений процесса на всё время сессии.
+	wakeTick      = 30 * time.Second
+	wakeThreshold = 60 * time.Second
 )
 
 type Options struct {
@@ -175,6 +181,13 @@ func (s *Session) Run(ctx context.Context) (err error) {
 	defer cancel()
 
 	var bg sync.WaitGroup
+	bg.Go(func() {
+		wake.New().Watch(runCtx, wakeTick, wakeThreshold, func(gap time.Duration) {
+			log.Warnf("device slept for %s - recycling TURN allocations", gap.Truncate(time.Second))
+			s.Wake()
+		})
+	})
+
 	var watchdogErr error
 	bg.Go(func() {
 		watchdogErr = s.watch(runCtx, cancel)
