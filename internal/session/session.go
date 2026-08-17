@@ -40,12 +40,13 @@ var (
 )
 
 const (
-	defaultStatusInterval       = 500 * time.Millisecond
-	defaultRateInterval         = time.Second
+	defaultStatusInterval       = 2 * time.Second
 	defaultUDPHandshakeTimeout  = 20 * time.Second
 	defaultHandshakeConcurrency = 3
 
-	wakeTick      = 5 * time.Second
+	// Порог вдвое больше тика: сон короче порога всё равно пропускаем, а тик почаще
+	// стоил бы пробуждений процесса на всё время сессии.
+	wakeTick      = 30 * time.Second
 	wakeThreshold = 60 * time.Second
 )
 
@@ -53,7 +54,6 @@ type Options struct {
 	ConnectTimeout time.Duration
 
 	StatusInterval       time.Duration
-	RateInterval         time.Duration
 	UDPHandshakeTimeout  time.Duration
 	HandshakeConcurrency int
 
@@ -63,9 +63,6 @@ type Options struct {
 func (o Options) withDefaults() Options {
 	if o.StatusInterval <= 0 {
 		o.StatusInterval = defaultStatusInterval
-	}
-	if o.RateInterval <= 0 {
-		o.RateInterval = defaultRateInterval
 	}
 	if o.UDPHandshakeTimeout <= 0 {
 		o.UDPHandshakeTimeout = defaultUDPHandshakeTimeout
@@ -184,28 +181,16 @@ func (s *Session) Run(ctx context.Context) (err error) {
 	defer cancel()
 
 	var bg sync.WaitGroup
-	if s.traffic != nil {
-		bg.Add(1)
-		go func() {
-			defer bg.Done()
-			s.traffic.rateMeter(runCtx, s.opts.RateInterval)
-		}()
-	}
-
-	bg.Add(1)
-	go func() {
-		defer bg.Done()
+	bg.Go(func() {
 		s.wake.Watch(runCtx, wakeTick, wakeThreshold, func(gap time.Duration) {
 			log.Warnf("device slept for %s - recycling TURN allocations", gap.Truncate(time.Second))
 		})
-	}()
+	})
 
 	var watchdogErr error
-	bg.Add(1)
-	go func() {
-		defer bg.Done()
+	bg.Go(func() {
 		watchdogErr = s.watch(runCtx, cancel)
-	}()
+	})
 
 	relayErr := s.relay(runCtx, prov, peer)
 	stopped := runCtx.Err() != nil
@@ -230,8 +215,7 @@ func (s *Session) Snapshot() Snapshot {
 	snap := Snapshot{Phase: st.phase, Streams: st.streams, Total: st.total, Err: st.err}
 	if s.traffic != nil {
 		snap.TxTotal, snap.RxTotal = s.traffic.stats.Counters()
-		snap.TxRate = s.traffic.txRate.Load()
-		snap.RxRate = s.traffic.rxRate.Load()
+		snap.TxRate, snap.RxRate = s.traffic.rates()
 	}
 	return snap
 }

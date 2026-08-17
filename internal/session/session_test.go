@@ -283,21 +283,25 @@ func TestSnapshotWithoutTrafficStaysZero(t *testing.T) {
 	}
 }
 
-func TestTrafficRateMeter(t *testing.T) {
+func TestTrafficRates(t *testing.T) {
 	tr := newTraffic()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go tr.rateMeter(ctx, 10*time.Millisecond)
+	// Первый вызов только запоминает отметку - скорость считать не с чего.
+	if tx, rx := tr.rates(); tx != 0 || rx != 0 {
+		t.Fatalf("first rates = tx %d rx %d, want zero", tx, rx)
+	}
 
 	tr.stats.AddTx(1000)
 	tr.stats.AddRx(500)
+	time.Sleep(50 * time.Millisecond)
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if tr.txRate.Load() == 1000 && tr.rxRate.Load() == 500 {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
+	tx, rx := tr.rates()
+	if tx < 1000 || rx < 500 || rx >= tx {
+		t.Fatalf("rates = tx %d rx %d, want tx >= 1000 > rx >= 500", tx, rx)
 	}
-	t.Fatalf("rates = tx %d rx %d, want tx 1000 rx 500", tr.txRate.Load(), tr.rxRate.Load())
+
+	// Без нового трафика скорость обязана упасть в ноль.
+	time.Sleep(10 * time.Millisecond)
+	if tx, rx := tr.rates(); tx != 0 || rx != 0 {
+		t.Fatalf("idle rates = tx %d rx %d, want zero", tx, rx)
+	}
 }
