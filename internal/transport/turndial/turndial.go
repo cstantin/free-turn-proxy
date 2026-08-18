@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pion/logging"
 	"github.com/pion/turn/v5"
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/netconn"
 	"github.com/samosvalishe/free-turn-proxy/internal/netctl"
 	"github.com/samosvalishe/free-turn-proxy/internal/randx"
@@ -21,6 +21,8 @@ type Config struct {
 	PortOverride string
 	TransportUDP bool
 	DialTimeout  time.Duration
+	Log          logx.Logger
+	StreamID     int
 }
 
 // Stream представляет активную TURN-аллокацию.
@@ -105,7 +107,7 @@ func Open(ctx context.Context, cfg Config, peer *net.UDPAddr, user, pass, rawAdd
 	permDead := make(chan struct{})
 	var permOnce sync.Once
 	loggerFactory := &permWatchFactory{
-		inner:     logging.NewDefaultLoggerFactory(),
+		inner:     &logxFactory{log: cfg.Log, stream: cfg.StreamID},
 		threshold: permFailThreshold,
 		onDead:    func() { permOnce.Do(func() { close(permDead) }) },
 	}

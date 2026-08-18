@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/turndial"
 )
 
@@ -13,7 +14,7 @@ import (
 type GetCredsFunc func(ctx context.Context, streamID int) (user, pass string, rawURLs []string, err error)
 
 // DialTURN запрашивает учетные данные и подключается к первому доступному TURN-серверу из списка кандидатов.
-func DialTURN(ctx context.Context, host, port string, udp bool, peer *net.UDPAddr, streamID int, getCreds GetCredsFunc) (*turndial.Stream, error) {
+func DialTURN(ctx context.Context, host, port string, udp bool, peer *net.UDPAddr, streamID int, getCreds GetCredsFunc, log logx.Logger) (*turndial.Stream, error) {
 	user, pass, rawURLs, err := getCreds(ctx, streamID)
 	if err != nil {
 		return nil, fmt.Errorf("get TURN creds: %w", err)
@@ -30,6 +31,8 @@ func DialTURN(ctx context.Context, host, port string, udp bool, peer *net.UDPAdd
 			HostOverride: host,
 			PortOverride: port,
 			TransportUDP: udp,
+			Log:          log,
+			StreamID:     streamID,
 		}, peer, user, pass, rawURL)
 		if derr == nil {
 			return stream, nil

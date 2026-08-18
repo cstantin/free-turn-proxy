@@ -93,7 +93,7 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 	// Стрим 1 стартует первым для прогрева кэша учетных данных.
 	okchan := make(chan struct{}, 1)
 	{
-		cchan := make(chan net.PacketConn)
+		cchan := make(chan streamPair)
 		wg.Go(func() {
 			DTLSLoop(runCtx, deps, params, peer, listenConn, inboundChan, cchan, okchan, 1)
 		})
@@ -109,7 +109,7 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 	}
 
 	for i := 1; i < numStreams; i++ {
-		cchan := make(chan net.PacketConn)
+		cchan := make(chan streamPair)
 		streamID := i + 1
 		wg.Go(func() {
 			DTLSLoop(runCtx, deps, params, peer, listenConn, inboundChan, cchan, nil, streamID)

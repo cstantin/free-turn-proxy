@@ -17,14 +17,31 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/wire/shape"
 )
 
+// errPairRecycled - пару свернул TURN-цикл (аллокация мертва), а не сеть: сетевой
+// backoff тут только удлиняет простой.
+var errPairRecycled = errors.New("udprelay: stream pair recycled")
+
+// streamPair связывает DTLS-сессию с аллокацией, поверх которой она поднята. Смерть
+// аллокации обязана ронять DTLS: у новой аллокации другой relayed-адрес, а миграция
+// адреса по DTLS Connection ID под obf-профилем на сервере не работает - сервер примет
+// такие записи за новую сессию и будет ждать от них handshake.
+type streamPair struct {
+	pipe   net.PacketConn
+	cancel context.CancelFunc
+}
+
 // DTLSLoop поддерживает и перезапускает DTLS-соединение для указанного streamID.
-func DTLSLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *Packet, connchan chan<- net.PacketConn, okchan chan<- struct{}, streamID int) {
+func DTLSLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *Packet, connchan chan<- streamPair, okchan chan<- struct{}, streamID int) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 			err := oneDTLS(ctx, deps, params, peer, listenConn, inboundChan, connchan, okchan, streamID)
+			// Пара пересоздаётся под новую аллокацию - TURN-цикл уже держит свою паузу.
+			if errors.Is(err, errPairRecycled) {
+				continue
+			}
 			if err != nil && time.Now().Unix() < deps.Auth.BackoffUntilUnix() && errors.Is(err, context.DeadlineExceeded) {
 				select {
 				case <-ctx.Done():
@@ -45,12 +62,12 @@ func DTLSLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 }
 
 // TURNLoop управляет жизненным циклом одной TURN-аллокации.
-func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, connchan <-chan net.PacketConn, streamID int) {
+func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, connchan <-chan streamPair, streamID int) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case conn2 := <-connchan:
+		case pair := <-connchan:
 			// Джиттер разводит Allocate соседних стримов во времени.
 			select {
 			case <-time.After(time.Duration(randx.Intn(400)+100) * time.Millisecond):
@@ -58,7 +75,7 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 				return
 			}
 			c := make(chan error, 1)
-			go oneTURN(ctx, deps, params, peer, conn2, streamID, c)
+			go oneTURN(ctx, deps, params, peer, pair.pipe, streamID, c)
 
 			var err error
 			select {
@@ -66,6 +83,8 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 			case <-ctx.Done():
 				return
 			}
+			// Аллокация кончилась - DTLS поверх неё сервер больше не адресует (см. streamPair).
+			pair.cancel()
 			if err != nil {
 				if errors.Is(err, provider.ErrFatalNoStreams) {
 					deps.log().Errorf("[STREAM %d] Fatal provider error. Shutting down application.", streamID)
@@ -105,28 +124,35 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 	}
 }
 
-func oneDTLS(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *Packet, connchan chan<- net.PacketConn, okchan chan<- struct{}, streamID int) error {
-	select {
-	case <-time.After(time.Duration(randx.Intn(400)+100) * time.Millisecond):
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
+func oneDTLS(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *Packet, connchan chan<- streamPair, okchan chan<- struct{}, streamID int) error {
 	dtlsctx, dtlscancel := context.WithCancel(ctx)
 	defer dtlscancel()
+
+	err := dtlsSession(dtlsctx, dtlscancel, deps, params, peer, listenConn, inboundChan, connchan, okchan, streamID)
+	// Отменена именно пара, а не вся сессия - значит её свернул TURN-цикл.
+	if err != nil && ctx.Err() == nil && dtlsctx.Err() != nil {
+		return errPairRecycled
+	}
+	return err
+}
+
+func dtlsSession(dtlsctx context.Context, dtlscancel context.CancelFunc, deps *Deps, params *Params, peer *net.UDPAddr, listenConn net.PacketConn, inboundChan <-chan *Packet, connchan chan<- streamPair, okchan chan<- struct{}, streamID int) error {
+	select {
+	case <-time.After(time.Duration(randx.Intn(400)+100) * time.Millisecond):
+	case <-dtlsctx.Done():
+		return dtlsctx.Err()
+	}
 
 	conn1, conn2 := connutil.AsyncPacketPipe()
 	defer func() { _ = conn1.Close() }()
 	defer func() { _ = conn2.Close() }()
-	go func() {
-		for {
-			select {
-			case <-dtlsctx.Done():
-				return
-			case connchan <- conn2:
-			}
-		}
-	}()
+	// Ровно один раз: пара строго 1:1, иначе следующая аллокация села бы на DTLS, который
+	// уже сворачивают. Отдаём до handshake - его пакеты идут через эту же аллокацию.
+	select {
+	case connchan <- streamPair{pipe: conn2, cancel: dtlscancel}:
+	case <-dtlsctx.Done():
+		return dtlsctx.Err()
+	}
 	dtlsRaw, err1 := deps.DTLSDialer.Dial(dtlsctx, conn1, peer)
 	if err1 != nil {
 		return fmt.Errorf("failed to connect DTLS: %w", err1)
@@ -194,7 +220,7 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		c <- err
 	}()
 
-	stream, derr := DialTURN(ctx, params.Host, params.Port, params.TransportUDP, peer, streamID, params.GetCreds)
+	stream, derr := DialTURN(ctx, params.Host, params.Port, params.TransportUDP, peer, streamID, params.GetCreds, deps.log())
 	if derr != nil {
 		if deps.Auth.IsAuthError(derr) {
 			deps.Auth.HandleAuthError(streamID)
@@ -203,7 +229,6 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		return
 	}
 	relayConn := stream.Relay
-	deps.log().Debugf("[STREAM %d] TURN server IP: %s", streamID, stream.ServerUDPAddr.IP)
 	if deps.OnTURNServer != nil {
 		deps.OnTURNServer(stream.ServerUDPAddr.IP)
 	}
@@ -216,14 +241,22 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 	deps.ConnectedStreams.Add(1)
 	deps.Auth.ResetErrors(streamID)
 
+	relayedAddr := relayConn.LocalAddr().String()
+	deps.log().Infof("[STREAM %d] TURN allocation up: relayed=%s server=%s",
+		streamID, relayedAddr, stream.ServerUDPAddr.IP)
+
 	defer func() {
 		deps.ConnectedStreams.Add(-1)
-		if cerr := stream.Close(); cerr != nil {
+		// Освобождение аллокации логируем всегда: недошедший deallocate держит квоту VK
+		// до конца её lifetime, и следующий Allocate ловит 486.
+		cerr := stream.Close()
+		deps.log().Infof("[STREAM %d] TURN allocation released: relayed=%s deallocate=%v",
+			streamID, relayedAddr, cerr)
+		// Ошибку закрытия не ставим поверх причины выхода - она уже сказала, почему стрим упал.
+		if cerr != nil && err == nil {
 			err = fmt.Errorf("failed to close TURN stream: %w", cerr)
 		}
 	}()
-
-	deps.log().Debugf("[STREAM %d] relayed-address=%s", streamID, relayConn.LocalAddr().String())
 
 	wg := sync.WaitGroup{}
 	turnctx, turncancel := context.WithCancel(ctx)
@@ -348,7 +381,8 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 	if err := relayConn.SetDeadline(time.Time{}); err != nil {
 		deps.log().Errorf("Failed to clear relay deadline: %s", err)
 	}
-	// conn2 достаётся следующей аллокации - с истёкшим дедлайном она читала бы пустоту
+	// Дедлайн снимаем до закрытия пары: пока DTLS сворачивается, его записи в pipe не
+	// должны сыпать таймаутами вместо реальной причины выхода.
 	if err := conn2.SetDeadline(time.Time{}); err != nil {
 		deps.log().Errorf("Failed to clear pipe deadline: %s", err)
 	}
