@@ -48,6 +48,10 @@ const (
 	// стоил бы пробуждений процесса на всё время сессии.
 	wakeTick      = 30 * time.Second
 	wakeThreshold = 60 * time.Second
+
+	// Окно проверки живости после пробуждения: рецикл - только если за него не пришло
+	// ни байта. Больше периода keepalive туннеля (25 c у WireGuard по умолчанию).
+	wakeProbeWindow = 30 * time.Second
 )
 
 type Options struct {
@@ -56,6 +60,8 @@ type Options struct {
 	StatusInterval       time.Duration
 	UDPHandshakeTimeout  time.Duration
 	HandshakeConcurrency int
+	// WakeProbeWindow - окно проверки живости канала после пробуждения.
+	WakeProbeWindow time.Duration
 
 	Traffic bool
 }
@@ -69,6 +75,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.HandshakeConcurrency <= 0 {
 		o.HandshakeConcurrency = defaultHandshakeConcurrency
+	}
+	if o.WakeProbeWindow <= 0 {
+		o.WakeProbeWindow = wakeProbeWindow
 	}
 	return o
 }
@@ -114,6 +123,7 @@ type Session struct {
 	status      atomic.Pointer[statusInfo]
 	started     atomic.Bool
 	reconnectCh chan struct{}
+	wakeCh      chan struct{}
 }
 
 func New(cfg *config.Client, deps Deps) (*Session, error) {
@@ -132,6 +142,7 @@ func New(cfg *config.Client, deps Deps) (*Session, error) {
 		opts:        deps.Options.withDefaults(),
 		total:       total,
 		reconnectCh: make(chan struct{}, 1),
+		wakeCh:      make(chan struct{}, 1),
 	}
 	if s.opts.Traffic {
 		s.traffic = newTraffic()
@@ -183,10 +194,11 @@ func (s *Session) Run(ctx context.Context) (err error) {
 	var bg sync.WaitGroup
 	bg.Go(func() {
 		wake.New().Watch(runCtx, wakeTick, wakeThreshold, func(gap time.Duration) {
-			log.Warnf("device slept for %s - recycling TURN allocations", gap.Truncate(time.Second))
+			log.Warnf("device slept for %s - checking TURN allocations", gap.Truncate(time.Second))
 			s.Wake()
 		})
 	})
+	bg.Go(func() { s.watchWake(runCtx) })
 
 	var watchdogErr error
 	bg.Go(func() {
@@ -228,12 +240,64 @@ func (s *Session) runRelayLoop(ctx context.Context, prov provider.Provider, peer
 	}
 }
 
-// Wake форсирует чистый перезапуск relay (например, при смене сети), не трогая сам туннель.
+// Wake сообщает о подозрении на сон или смену сети. Рецикл не мгновенный: сначала
+// watchWake проверяет, молчит ли канал - пересоздание живых аллокаций стоит похода в VK
+// за реквизитами и решения капчи.
 func (s *Session) Wake() {
 	select {
-	case s.reconnectCh <- struct{}{}:
+	case s.wakeCh <- struct{}{}:
 	default:
 	}
+}
+
+// Рецикл только по факту тишины: сон сам по себе аллокацию не убивает (lifetime 600 c),
+// а keepalive туннеля идёт через тот же relay и растит Rx. Заодно схлопывает каскад -
+// гэп-детектор ядра и SCREEN_ON с платформы приходят почти одновременно.
+func (s *Session) watchWake(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.wakeCh:
+		}
+		if s.wakeNeedsRecycle(ctx) {
+			select {
+			case s.reconnectCh <- struct{}{}:
+			default:
+			}
+		}
+	}
+}
+
+func (s *Session) wakeNeedsRecycle(ctx context.Context) bool {
+	log := s.deps.Logger
+	// Подключение ещё идёт: рецикл отменил бы перебор реквизитов и решение капчи.
+	if s.connected.Load() == 0 {
+		log.Warnf("wake: сессия ещё поднимается - рецикл пропущен")
+		return false
+	}
+	// Без счётчиков трафика подтвердить живость нечем.
+	if s.traffic == nil {
+		return true
+	}
+	_, before := s.traffic.stats.Counters()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(s.opts.WakeProbeWindow):
+	}
+	// Пока ждали, могло прилететь ещё одно пробуждение - оно про тот же сон.
+	select {
+	case <-s.wakeCh:
+	default:
+	}
+	_, after := s.traffic.stats.Counters()
+	if after > before {
+		log.Warnf("wake: канал жив (+%d B за %s) - рецикл не нужен", after-before, s.opts.WakeProbeWindow)
+		return false
+	}
+	log.Warnf("wake: тишина %s - рецикл TURN-аллокаций", s.opts.WakeProbeWindow)
+	return true
 }
 
 // Snapshot возвращает текущий снимок состояния сессии.
