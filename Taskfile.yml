@@ -25,7 +25,7 @@ tasks:
   build:all:
     desc: Cross-compile all targets via goreleaser snapshot
     cmds:
-      - goreleaser release --snapshot --clean --skip=publish,sign
+      - goreleaser release --snapshot --clean --skip=publish,sign,checksum
 
   build:ios:
     desc: Build iOS XCFramework to dist/Mobile.xcframework
