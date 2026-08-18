@@ -169,7 +169,9 @@ func handleAccepted(ctx context.Context, logger logx.Logger, db *clientsdb.DB, c
 	}
 	logger.Debugf("Start handshake")
 	if err := dtlsConn.HandshakeContext(ctx1); err != nil {
-		logger.Warnf("Handshake failed: %v", err)
+		// Адрес обязателен: пачка таймаутов с новых адресов - признак того, что клиент
+		// сменил relayed-адрес, а его сессия сюда не смигрировала.
+		logger.Warnf("Handshake failed from %s: %v", conn.RemoteAddr(), err)
 		return
 	}
 	logger.Debugf("Handshake done")
@@ -190,9 +192,9 @@ func handleAccepted(ctx context.Context, logger logx.Logger, db *clientsdb.DB, c
 		logger.Debugf("Client ID received (no allowlist): %s", clientID)
 	}
 
+	logger.Infof("Session up: client=%s from=%s", clientID, conn.RemoteAddr())
 	udpserver.Handle(ctx, logger, conn, cfg.Proxy.Connect)
-
-	logger.Debugf("Connection closed: %s", conn.RemoteAddr())
+	logger.Infof("Session down: client=%s from=%s", clientID, conn.RemoteAddr())
 }
 
 func handleClientsCommand(args []string) {
