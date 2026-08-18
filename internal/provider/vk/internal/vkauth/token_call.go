@@ -172,6 +172,14 @@ func (c *Client) solveCaptcha(
 		manualCancel()
 	}
 
+	// Сессию свернули (стоп, смена сети, рецикл) - решателю просто не дали доработать.
+	// Считать это провалом значит жечь поколение персоны и вешать lockout на своих же
+	// перезапусках.
+	if solveErr != nil && ctx.Err() != nil {
+		c.log.Warnf("[STREAM %d] [Captcha] solve interrupted by shutdown: %v", streamID, solveErr)
+		return "", solveErr
+	}
+
 	if solveErr != nil {
 		c.log.Warnf("[STREAM %d] [Captcha] %s failed (attempt %d): %v",
 			streamID, CaptchaSolveModeLabel(solveMode), attempt+1, solveErr)
