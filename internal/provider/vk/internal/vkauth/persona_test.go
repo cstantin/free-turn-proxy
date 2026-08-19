@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -20,11 +21,11 @@ func testCaptchaErr() *captcha.Error {
 func TestPersonaStableUntilBurned(t *testing.T) {
 	c := New(Config{FingerprintSeed: "install-1"})
 	first, again := c.currentPersona(), c.currentPersona()
-	if first != again {
+	if !reflect.DeepEqual(first, again) {
 		t.Fatal("persona not stable")
 	}
 	same := New(Config{FingerprintSeed: "install-1"})
-	if same.currentPersona() != c.currentPersona() {
+	if !reflect.DeepEqual(same.currentPersona(), c.currentPersona()) {
 		t.Fatal("same seed produced different persona")
 	}
 	other := New(Config{FingerprintSeed: "install-2"})

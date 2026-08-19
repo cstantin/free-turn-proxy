@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	fhttp "github.com/bogdanfinn/fhttp"
@@ -36,17 +35,14 @@ const (
 )
 
 var (
-	reCaptchaScriptSrc  = regexp.MustCompile(`src="(https://[^"]+not_robot_captcha[^"]+)"`)
 	reCaptchaInitGlobal = regexp.MustCompile(`window\.init\s*=\s*\{`)
-	reCaptchaDebugInfo  = regexp.MustCompile(`debug_info:(?:[^"]*\|\|)?"([a-fA-F0-9]{64})"`)
+	reCaptchaVKGlobal   = regexp.MustCompile(`window\.vk\s*=\s*\{`)
+	reCaptchaDebugInfo  = regexp.MustCompile(`[A-Za-z_$][\w$]*:\s*"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"`)
 
 	errCaptchaRateLimit = errors.New("captcha session rate limit reached")
 	errCaptchaBot       = errors.New("captcha bot challenge")
 
 	captchaMaxAttempts = 2
-
-	// debug_info - константа бандла, одна на все сессии; ключ кэша - URL бандла.
-	debugInfoCache sync.Map
 )
 
 type captchaInitSetting struct {
@@ -57,7 +53,7 @@ type captchaInitSetting struct {
 
 type captchaPage struct {
 	Pow       powParams
-	ScriptURL string
+	DebugInfo string
 	Init      captchaInitData
 }
 
@@ -193,7 +189,7 @@ func (s *captchaSession) solveOnce(captchaErr *Error) (string, error) {
 	}
 
 	// Браузер тянет подресурсы параллельно с исполнением скрипта, не после него.
-	assets := parsePageAssets(html, page.ScriptURL)
+	assets := parsePageAssets(html)
 	assetsDone := make(chan struct{})
 	go func() {
 		defer close(assetsDone)
@@ -208,10 +204,8 @@ func (s *captchaSession) solveOnce(captchaErr *Error) (string, error) {
 		return "", err
 	}
 
-	s.debugInfo, err = s.resolveDebugInfo(page.ScriptURL)
-	if err != nil {
-		return "", err
-	}
+	s.debugInfo = page.DebugInfo
+	s.logger().Debugf("[Captcha] debug_info=%s", s.debugInfo)
 
 	<-assetsDone
 
@@ -407,56 +401,35 @@ func (s *captchaSession) fetchCaptchaHTML(redirectURI string) (string, error) {
 	return string(body), nil
 }
 
-// resolveDebugInfo берёт константу только из живого бандла: пин означал бы чужой
-// debug_info после любой ротации версии виджета.
-func (s *captchaSession) resolveDebugInfo(scriptURL string) (string, error) {
-	if scriptURL == "" {
-		return "", errors.New("captcha script URL not in HTML")
-	}
-	v, err := s.fetchDebugInfoJS(scriptURL)
-	if err != nil {
-		return "", fmt.Errorf("captcha debug_info: %w", err)
-	}
-	s.logger().Debugf("[Captcha] debug_info from JS len=%d", len(v))
-	return v, nil
-}
-
-func (s *captchaSession) fetchDebugInfoJS(scriptURL string) (string, error) {
-	if cached, ok := debugInfoCache.Load(scriptURL); ok {
-		if v, ok := cached.(string); ok {
-			return v, nil
-		}
-	}
-	// Бандл тянет тег <script> страницы captcha, а не fetch: другой Dest и no-cors.
-	body, err := s.doRaw(fhttp.MethodGet, scriptURL, nil, map[string]string{
-		"Accept":         "*/*",
-		"Sec-Fetch-Dest": "script",
-		"Sec-Fetch-Mode": "no-cors",
-		"Sec-Fetch-Site": "same-site",
-		"Referer":        s.pageOrigin + "/",
-	})
-	if err != nil {
-		return "", err
-	}
-	m := reCaptchaDebugInfo.FindSubmatch(body)
-	if len(m) < 2 {
-		return "", errors.New("debug_info constant not found in JS")
-	}
-	v := string(m[1])
-	debugInfoCache.Store(scriptURL, v)
-	return v, nil
-}
-
 func parseCaptchaPage(html string) (*captchaPage, error) {
 	pow, err := parsePowParams(html)
 	if err != nil {
 		return nil, err
 	}
-	page := &captchaPage{Pow: pow, Init: parseCaptchaInitGlobal(html)}
-	if m := reCaptchaScriptSrc.FindStringSubmatch(html); len(m) >= 2 {
-		page.ScriptURL = m[1]
+	debugInfo := parseCaptchaDebugInfo(html)
+	if debugInfo == "" {
+		return nil, errors.New("captcha debug_info not found on page")
 	}
-	return page, nil
+	return &captchaPage{Pow: pow, DebugInfo: debugInfo, Init: parseCaptchaInitGlobal(html)}, nil
+}
+
+func parseCaptchaDebugInfo(html string) string {
+	m := reCaptchaVKGlobal.FindStringIndex(html)
+	if m == nil {
+		return ""
+	}
+	block := balancedJSONObject(html[m[1]-1:])
+	if block == "" {
+		return ""
+	}
+	found := reCaptchaDebugInfo.FindAllStringSubmatch(block, -1)
+	if len(found) == 0 {
+		return ""
+	}
+	if len(found) > 1 {
+		Log.Warnf("[Captcha] window.vk holds %d uuid values, debug_info may be the wrong one", len(found))
+	}
+	return found[0][1]
 }
 
 // powSnippet - окно вокруг конверта PoW: при следующей смене разметки этого

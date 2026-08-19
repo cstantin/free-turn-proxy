@@ -29,11 +29,8 @@ type asset struct {
 	Dest string
 }
 
-func parsePageAssets(html, skip string) []asset {
+func parsePageAssets(html string) []asset {
 	seen := map[string]struct{}{}
-	if skip != "" {
-		seen[skip] = struct{}{}
-	}
 	out := make([]asset, 0, assetsMaxCount)
 
 	add := func(raw, dest string) {

@@ -2,6 +2,7 @@ package browserprofile
 
 import (
 	"encoding/json"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -81,7 +82,7 @@ func TestForIsDeterministic(t *testing.T) {
 	for _, plat := range []Platform{Desktop, Mobile} {
 		id := Identity{Seed: testSeed, Gen: 3}
 		first, again := For(plat, id), For(plat, id)
-		if first != again {
+		if !reflect.DeepEqual(first, again) {
 			t.Fatalf("%s: For not deterministic", plat)
 		}
 	}

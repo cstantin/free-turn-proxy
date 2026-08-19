@@ -157,16 +157,22 @@ func marshalJS(v any) ([]byte, error) {
 // powTelemetryData - пробы PoW-скрипта; порядок полей = порядок проб, так их
 // пишет JSON.stringify.
 type powTelemetryData struct {
-	Globals         powProbe `json:"globals"`
-	UA              powProbe `json:"ua"`
-	Frame           powProbe `json:"frame"`
-	MatchMedia      powProbe `json:"match_media"`
-	Plugins         powProbe `json:"plugins"`
-	NavTamper       powProbe `json:"nav_tamper"`
-	Referrer        powProbe `json:"referrer"`
-	DevTools        powProbe `json:"devtools"`
-	CSS             powProbe `json:"css"`
-	NativeIntegrity powProbe `json:"native_integrity"`
+	Globals          powProbe `json:"globals"`
+	UA               powProbe `json:"ua"`
+	Frame            powProbe `json:"frame"`
+	MatchMedia       powProbe `json:"match_media"`
+	Plugins          powProbe `json:"plugins"`
+	NavTamper        powProbe `json:"nav_tamper"`
+	Referrer         powProbe `json:"referrer"`
+	DevTools         powProbe `json:"devtools"`
+	CSS              powProbe `json:"css"`
+	NativeIntegrity  powProbe `json:"native_integrity"`
+	CookieTest       powProbe `json:"cookie_test"`
+	AncestorOrigins  powProbe `json:"ancestor_origins"`
+	SandboxBehavior  powProbe `json:"sandbox_behavior"`
+	MaxTouchPoints   powProbe `json:"max_touch_points"`
+	TimezoneLocale   powProbe `json:"timezone_locale"`
+	DevicePixelRatio powProbe `json:"device_pixel_ratio"`
 }
 
 type powProbe struct {
@@ -177,16 +183,31 @@ type powProbe struct {
 func probe(result any) powProbe { return powProbe{OK: true, Result: result} }
 
 type powGlobals struct {
-	Doc       bool `json:"doc"`
-	Win       bool `json:"win"`
-	Nav       bool `json:"nav"`
-	Webdriver bool `json:"webdriver"`
-	HW        int  `json:"hw"`
-	Mem       *int `json:"mem"`
+	Doc          bool `json:"doc"`
+	Win          bool `json:"win"`
+	Nav          bool `json:"nav"`
+	Webdriver    bool `json:"webdriver"`
+	Subtle       bool `json:"subtle"`
+	Secure       bool `json:"secure"`
+	GCS          bool `json:"gcs"`
+	RAF          bool `json:"raf"`
+	Wasm         bool `json:"wasm"`
+	PluginsLen   int  `json:"plugins_len"`
+	LanguagesLen int  `json:"languages_len"`
+	HW           int  `json:"hw"`
+	Mem          *int `json:"mem"`
 }
 
 type powUA struct {
-	UserAgent string `json:"userAgent"`
+	UserAgent     string     `json:"userAgent"`
+	UserAgentData *powUAData `json:"userAgentData"`
+}
+
+type powUAData struct {
+	Brands       []browserprofile.Brand `json:"brands"`
+	Platform     string                 `json:"platform"`
+	Mobile       bool                   `json:"mobile"`
+	Architecture *string                `json:"architecture"`
 }
 
 type powFrame struct {
@@ -203,13 +224,20 @@ type powMatchMedia struct {
 }
 
 type powPlugins struct {
-	Length   int      `json:"length"`
-	Names    []string `json:"names"`
-	IsChrome bool     `json:"isChrome"`
+	Length       int        `json:"length"`
+	Names        []string   `json:"names"`
+	Descriptions []string   `json:"descriptions"`
+	MimeTypes    [][]string `json:"mimeTypes"`
+	IsChrome     bool       `json:"isChrome"`
 }
 
 type powNavTamper struct {
-	Tampered bool `json:"tampered"`
+	Tampered       bool   `json:"tampered"`
+	ElCtor         string `json:"el_ctor"`
+	StyleCtor      string `json:"style_ctor"`
+	NavCtor        string `json:"nav_ctor"`
+	AlertNative    bool   `json:"alert_native"`
+	ToStringNative bool   `json:"to_string_native"`
 }
 
 type powReferrer struct {
@@ -219,7 +247,8 @@ type powReferrer struct {
 }
 
 type powDevTools struct {
-	Open bool `json:"open"`
+	Open    bool `json:"open"`
+	DelayMs int  `json:"delay_ms"`
 }
 
 type powCSS struct {
@@ -227,11 +256,43 @@ type powCSS struct {
 }
 
 type powNativeIntegrity struct {
-	ProtoMatch bool `json:"protoMatch"`
-	XHRNative  bool `json:"xhrNative"`
+	ProtoMatch             bool `json:"protoMatch"`
+	XHRNative              bool `json:"xhrNative"`
+	XHRSendNative          bool `json:"xhrSendNative"`
+	AddEventListenerNative bool `json:"addEventListenerNative"`
+	AlertNative            bool `json:"alertNative"`
+	ToStringNative         bool `json:"toStringNative"`
 }
 
-// Chrome отдаёт пять фиктивных PDF-плагинов везде, где умеет показывать PDF.
+type powCookieTest struct {
+	Write bool `json:"write"`
+}
+
+type powAncestorOrigins struct {
+	AncestorOrigin *string `json:"ancestorOrigin"`
+}
+
+type powSandboxBehavior struct {
+	OriginIsNull   bool `json:"originIsNull"`
+	LocalStorage   bool `json:"localStorage"`
+	SessionStorage bool `json:"sessionStorage"`
+}
+
+type powMaxTouchPoints struct {
+	MaxTouchPoints int `json:"maxTouchPoints"`
+}
+
+type powTimezoneLocale struct {
+	Timezone  string   `json:"timezone"`
+	Languages []string `json:"languages"`
+}
+
+type powDevicePixelRatio struct {
+	DPR              float64 `json:"dpr"`
+	Orientation      string  `json:"orientation"`
+	OrientationAngle int     `json:"orientationAngle"`
+}
+
 var chromePDFPlugins = []string{
 	"PDF Viewer",
 	"Chrome PDF Viewer",
@@ -240,36 +301,84 @@ var chromePDFPlugins = []string{
 	"WebKit built-in PDF",
 }
 
+const chromePDFDescription = "Portable Document Format"
+
+var chromePDFMimeTypes = []string{"application/pdf", "text/pdf"}
+
+func chromePlugins() powPlugins {
+	out := powPlugins{
+		Length:       len(chromePDFPlugins),
+		Names:        chromePDFPlugins,
+		Descriptions: make([]string, len(chromePDFPlugins)),
+		MimeTypes:    make([][]string, len(chromePDFPlugins)),
+		IsChrome:     true,
+	}
+	for i := range chromePDFPlugins {
+		out.Descriptions[i] = chromePDFDescription
+		out.MimeTypes[i] = chromePDFMimeTypes
+	}
+	return out
+}
+
 // powTelemetry описывает страницу такой, какой её видел бы браузер персоны:
 // страницу мы тянем верхнеуровневой навигацией (Sec-Fetch-Dest: document),
 // поэтому frame и referrer описывают top-level документ - врозь их менять нельзя.
 func (s *captchaSession) powTelemetry() powTelemetryData {
 	p := s.profile
 	// На Android нет встроенного PDF-вьювера, значит и списка плагинов.
-	plugins := powPlugins{Names: []string{}}
+	plugins := powPlugins{Names: []string{}, Descriptions: []string{}, MimeTypes: [][]string{}}
 	if !p.IsMobile() {
-		plugins = powPlugins{Length: len(chromePDFPlugins), Names: chromePDFPlugins, IsChrome: true}
+		plugins = chromePlugins()
 	}
 	dark := prefersDark(p)
 	return powTelemetryData{
 		Globals: probe(powGlobals{
 			Doc: true, Win: true, Nav: true,
-			Webdriver: p.Webdriver(),
-			HW:        p.HardwareConcurrency(),
-			Mem:       p.DeviceMemory(),
+			Webdriver:    p.Webdriver(),
+			Subtle:       true,
+			Secure:       true,
+			GCS:          true,
+			RAF:          true,
+			Wasm:         true,
+			PluginsLen:   plugins.Length,
+			LanguagesLen: len(p.Languages()),
+			HW:           p.HardwareConcurrency(),
+			Mem:          p.DeviceMemory(),
 		}),
-		UA:         probe(powUA{UserAgent: p.UserAgent}),
+		UA: probe(powUA{
+			UserAgent: p.UserAgent,
+			UserAgentData: &powUAData{
+				Brands:   p.Brands(),
+				Platform: p.PlatformName(),
+				Mobile:   p.IsMobile(),
+			},
+		}),
 		Frame:      probe(powFrame{ParentAccessible: true}),
 		MatchMedia: probe(powMatchMedia{PrefersDark: dark, PrefersLight: !dark, PointerFine: !p.IsMobile()}),
 		Plugins:    probe(plugins),
-		NavTamper:  probe(powNavTamper{}),
+		NavTamper: probe(powNavTamper{
+			ElCtor: "HTMLDivElement", StyleCtor: "CSSStyleDeclaration", NavCtor: "Navigator",
+			AlertNative: true, ToStringNative: true,
+		}),
 		Referrer: probe(powReferrer{
 			Referrer: "https://" + s.domain + "/",
 			Domain:   strings.TrimPrefix(s.pageOrigin, "https://"),
 		}),
-		DevTools:        probe(powDevTools{}),
-		CSS:             probe(powCSS{}),
-		NativeIntegrity: probe(powNativeIntegrity{ProtoMatch: true, XHRNative: true}),
+		DevTools: probe(powDevTools{}),
+		CSS:      probe(powCSS{}),
+		NativeIntegrity: probe(powNativeIntegrity{
+			ProtoMatch: true, XHRNative: true, XHRSendNative: true,
+			AddEventListenerNative: true, AlertNative: true, ToStringNative: true,
+		}),
+		CookieTest:      probe(powCookieTest{Write: true}),
+		AncestorOrigins: probe(powAncestorOrigins{}),
+		SandboxBehavior: probe(powSandboxBehavior{LocalStorage: true, SessionStorage: true}),
+		MaxTouchPoints:  probe(powMaxTouchPoints{MaxTouchPoints: p.MaxTouchPoints()}),
+		TimezoneLocale:  probe(powTimezoneLocale{Timezone: p.Timezone(), Languages: p.Languages()}),
+		DevicePixelRatio: probe(powDevicePixelRatio{
+			DPR:         p.DevicePixelRatio(),
+			Orientation: p.Orientation(),
+		}),
 	}
 }
 

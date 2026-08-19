@@ -26,13 +26,13 @@ func TestParseCaptchaPageFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if page.Pow.Input != "fnZQN7lKKXvo37tH" || page.Pow.Difficulty != 2 || page.Pow.Prefix != "v2." {
+	if page.Pow.Input != "ST9BEClStK0wSdo4" || page.Pow.Difficulty != 2 || page.Pow.Prefix != "v2." {
 		t.Fatalf("pow = %+v", page.Pow)
 	}
-	if page.ScriptURL != "https://static.vk.ru/vkid/1.1.1394/not_robot_captcha.js" {
-		t.Fatalf("script url = %q", page.ScriptURL)
+	if page.DebugInfo != "273cc83f-426f-4d98-9ce5-92490107e3a6" {
+		t.Fatalf("debug_info = %q", page.DebugInfo)
 	}
-	if !page.Init.Found || page.Init.APIHost != "api.vk.ru" || page.Init.ShowType != "checkbox" {
+	if page.Init.Found {
 		t.Fatalf("init = %+v", page.Init)
 	}
 }
@@ -82,17 +82,24 @@ func TestSolvePoW(t *testing.T) {
 // Эталон снят с персоны seed=fixture; tel_hash сверен с канонизатором самой
 // страницы. Любая правка значений телеметрии обязана осознанно двигать эталон.
 const (
-	goldenTelemetry = `{"globals":{"ok":true,"result":{"doc":true,"win":true,"nav":true,"webdriver":false,"hw":12,"mem":8}},` +
-		`"ua":{"ok":true,"result":{"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"}},` +
+	goldenTelemetry = `{"globals":{"ok":true,"result":{"doc":true,"win":true,"nav":true,"webdriver":false,"subtle":true,"secure":true,"gcs":true,"raf":true,"wasm":true,"plugins_len":5,"languages_len":2,"hw":12,"mem":8}},` +
+		`"ua":{"ok":true,"result":{"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36","userAgentData":{"brands":[{"brand":"Google Chrome","version":"146"},{"brand":"Chromium","version":"146"},{"brand":"Not)A;Brand","version":"24"}],"platform":"Windows","mobile":false,"architecture":null}}},` +
 		`"frame":{"ok":true,"result":{"frameElement":null,"ancestorOriginsLen":0,"parentAccessible":true}},` +
 		`"match_media":{"ok":true,"result":{"prefersDark":true,"prefersLight":false,"reducedMotion":false,"pointerFine":true}},` +
-		`"plugins":{"ok":true,"result":{"length":5,"names":["PDF Viewer","Chrome PDF Viewer","Chromium PDF Viewer","Microsoft Edge PDF Viewer","WebKit built-in PDF"],"isChrome":true}},` +
-		`"nav_tamper":{"ok":true,"result":{"tampered":false}},` +
+		`"plugins":{"ok":true,"result":{"length":5,"names":["PDF Viewer","Chrome PDF Viewer","Chromium PDF Viewer","Microsoft Edge PDF Viewer","WebKit built-in PDF"],"descriptions":["Portable Document Format","Portable Document Format","Portable Document Format","Portable Document Format","Portable Document Format"],"mimeTypes":[["application/pdf","text/pdf"],["application/pdf","text/pdf"],["application/pdf","text/pdf"],["application/pdf","text/pdf"],["application/pdf","text/pdf"]],"isChrome":true}},` +
+		`"nav_tamper":{"ok":true,"result":{"tampered":false,"el_ctor":"HTMLDivElement","style_ctor":"CSSStyleDeclaration","nav_ctor":"Navigator","alert_native":true,"to_string_native":true}},` +
 		`"referrer":{"ok":true,"result":{"referrer":"https://vk.com/","inIframe":false,"domain":"id.vk.ru"}},` +
-		`"devtools":{"ok":true,"result":{"open":false}},` +
+		`"devtools":{"ok":true,"result":{"open":false,"delay_ms":0}},` +
 		`"css":{"ok":true,"result":{"expectedMissing":0}},` +
-		`"native_integrity":{"ok":true,"result":{"protoMatch":true,"xhrNative":true}}}`
-	goldenTelHash = "4edea10bbb2b35b8790cfd79ad510fd8e833158c7095788841c2fd92b2edd3d1"
+		`"native_integrity":{"ok":true,"result":{"protoMatch":true,"xhrNative":true,"xhrSendNative":true,"addEventListenerNative":true,"alertNative":true,"toStringNative":true}},` +
+		`"cookie_test":{"ok":true,"result":{"write":true}},` +
+		`"ancestor_origins":{"ok":true,"result":{"ancestorOrigin":null}},` +
+		`"sandbox_behavior":{"ok":true,"result":{"originIsNull":false,"localStorage":true,"sessionStorage":true}},` +
+		`"max_touch_points":{"ok":true,"result":{"maxTouchPoints":0}},` +
+		`"timezone_locale":{"ok":true,"result":{"timezone":"Europe/Moscow","languages":["ru-RU","en-US"]}},` +
+		`"device_pixel_ratio":{"ok":true,"result":{"dpr":1,"orientation":"landscape-primary","orientationAngle":0}}}`
+
+	goldenTelHash = "838102524be656361f2f88dba3dd16d3baaa20b5b33251b472b365ff646b99e9"
 )
 
 // Конверт целиком: порядок ключей, телеметрия персоны и её sha256 - всё, что VK

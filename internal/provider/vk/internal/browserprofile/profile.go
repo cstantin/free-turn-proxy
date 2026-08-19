@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strconv"
+	"strings"
 
 	fhttp "github.com/bogdanfinn/fhttp"
 	"github.com/bogdanfinn/tls-client/profiles"
@@ -17,6 +18,9 @@ const (
 	uaWindows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
 	uaMac     = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
 	uaAndroid = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36"
+
+	timezoneMoscow    = "Europe/Moscow"
+	touchPointsMobile = 5
 )
 
 type Platform string
@@ -48,6 +52,7 @@ type Profile struct {
 	cores     int
 	memGB     int
 	webdriver bool
+	dev       device
 }
 
 func (p Profile) IsMobile() bool { return p.Platform == Mobile }
@@ -61,6 +66,45 @@ func (p Profile) DeviceMemory() *int {
 		return nil
 	}
 	return &p.memGB
+}
+
+func (p Profile) Languages() []string { return p.dev.Languages }
+
+func (p Profile) DevicePixelRatio() float64 { return p.dev.DevicePixelRatio }
+
+func (Profile) Timezone() string { return timezoneMoscow }
+
+func (p Profile) MaxTouchPoints() int {
+	if p.IsMobile() {
+		return touchPointsMobile
+	}
+	return 0
+}
+
+func (p Profile) Orientation() string {
+	if p.IsMobile() {
+		return "portrait-primary"
+	}
+	return "landscape-primary"
+}
+
+func (p Profile) PlatformName() string { return strings.Trim(p.SecChUaPlatform, `"`) }
+
+type Brand struct {
+	Brand   string `json:"brand"`
+	Version string `json:"version"`
+}
+
+func (p Profile) Brands() []Brand {
+	out := make([]Brand, 0, 3)
+	for _, part := range strings.Split(p.SecChUa, ", ") {
+		name, ver, ok := strings.Cut(part, ";v=")
+		if !ok {
+			continue
+		}
+		out = append(out, Brand{Brand: strings.Trim(name, `"`), Version: strings.Trim(ver, `"`)})
+	}
+	return out
 }
 
 type device struct {
@@ -186,6 +230,7 @@ func withDevice(p Profile, d device) Profile {
 		return p
 	}
 	p.DeviceJSON = string(data)
+	p.dev = d
 	p.cores, p.webdriver = d.HardwareConcurrency, d.Webdriver
 	if d.DeviceMemory != nil {
 		p.memGB = *d.DeviceMemory

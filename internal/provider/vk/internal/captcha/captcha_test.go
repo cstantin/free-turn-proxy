@@ -236,3 +236,36 @@ func TestSetPageURLFallsBackToWidgetOrigin(t *testing.T) {
 		t.Fatalf("page = %q / %q", s.pageOrigin, s.pageURL)
 	}
 }
+
+func TestParseCaptchaDebugInfo(t *testing.T) {
+	tests := []struct {
+		name, html, want string
+	}{
+		{
+			name: "renamed key",
+			html: `<script>window.vk = {stDomain: "https://st.vk.ru", qqqqqqqq: "273cc83f-426f-4d98-9ce5-92490107e3a6", id: 0};</script>`,
+			want: "273cc83f-426f-4d98-9ce5-92490107e3a6",
+		},
+		{
+			name: "quoted keys of nested json are not candidates",
+			html: `<script>window.vk = {statsMeta: {"hash":"X84u4GhF","uuid":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}, k: "273cc83f-426f-4d98-9ce5-92490107e3a6"};</script>`,
+			want: "273cc83f-426f-4d98-9ce5-92490107e3a6",
+		},
+		{name: "no window.vk", html: `<script>var x = 1;</script>`},
+		{name: "no uuid in block", html: `<script>window.vk = {id: 0, logoutUrl: ""};</script>`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseCaptchaDebugInfo(tt.html); got != tt.want {
+				t.Fatalf("debug_info = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseCaptchaDebugInfoAmbiguous(t *testing.T) {
+	html := `<script>window.vk = {a: "273cc83f-426f-4d98-9ce5-92490107e3a6", b: "ec772ebb-0d69-4fa0-b974-904549c8a7d1"};</script>`
+	if got := parseCaptchaDebugInfo(html); got != "273cc83f-426f-4d98-9ce5-92490107e3a6" {
+		t.Fatalf("debug_info = %q", got)
+	}
+}
