@@ -51,6 +51,7 @@ type Deps struct {
 	ConnectedStreams *atomic.Int32
 	OnTURNServer     func(ip net.IP)
 	fatalCh          chan error
+	allocPace        *allocPacer
 }
 
 func (d *Deps) log() logx.Logger {
@@ -91,6 +92,7 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 		ConnectedStreams: connectedStreams,
 		OnTURNServer:     onTURNServer,
 		fatalCh:          fatalCh,
+		allocPace:        newAllocPacer(allocPaceInterval),
 	}
 
 	runCtx, runCancel := context.WithCancel(ctx)
@@ -102,6 +104,18 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 		<-runCtx.Done()
 		if err := listenConn.SetReadDeadline(time.Now()); err != nil {
 			logger.Errorf("udprelay: set listen deadline: %s", err)
+		}
+	}()
+
+	var fatalErr atomic.Pointer[error]
+	watcherDone := make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		select {
+		case err := <-fatalCh:
+			fatalErr.Store(&err)
+			runCancel()
+		case <-runCtx.Done():
 		}
 	}()
 
@@ -139,18 +153,6 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 			TURNLoop(runCtx, deps, params, peer, cchan, streamID)
 		}))
 	}
-
-	var fatalErr atomic.Pointer[error]
-	watcherDone := make(chan struct{})
-	go func() {
-		defer close(watcherDone)
-		select {
-		case err := <-fatalCh:
-			fatalErr.Store(&err)
-			runCancel()
-		case <-runCtx.Done():
-		}
-	}()
 
 	wg.Wait()
 	runCancel()

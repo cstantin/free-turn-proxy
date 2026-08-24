@@ -119,3 +119,27 @@ func TestRunReturnsOnStreamPanic(t *testing.T) {
 		t.Fatal("Run hung on panic in stream goroutine")
 	}
 }
+
+func TestRunFatalDoesNotWaitWarmupBarrier(t *testing.T) {
+	t.Parallel()
+	dialer, params, peer, local := runFatalDeps(t)
+
+	var connected atomic.Int32
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		done <- Run(context.Background(), dialer, stubAuth{}, logx.Nop(), &connected, nil, params, peer, local, 4)
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrFatal) {
+			t.Fatalf("err = %v, want ErrFatal", err)
+		}
+		if elapsed := time.Since(start); elapsed >= streamStartBarrier {
+			t.Fatalf("Run took %v, want less than warm-up barrier %v", elapsed, streamStartBarrier)
+		}
+	case <-time.After(2 * streamStartBarrier):
+		t.Fatal("Run hung on fatal provider error")
+	}
+}
