@@ -234,8 +234,11 @@ func (c *Client) fetchSerialized(ctx context.Context, link string, streamID int)
 		case <-time.After(wait):
 		}
 	}
-	defer func() { c.lastFetchTime = time.Now() }()
-	return c.fetch(ctx, link, streamID)
+	user, pass, addrs, err := c.fetch(ctx, link, streamID)
+	if ctx.Err() == nil {
+		c.lastFetchTime = time.Now()
+	}
+	return user, pass, addrs, err
 }
 
 func (c *Client) fetch(ctx context.Context, link string, streamID int) (string, string, []string, error) {
@@ -258,6 +261,9 @@ func (c *Client) fetch(ctx context.Context, link string, streamID int) (string, 
 			return user, pass, addrs, nil
 		}
 		lastErr = err
+		if ctx.Err() != nil {
+			return "", "", nil, err
+		}
 		c.log.Warnf("[STREAM %d] [VK Auth] Failed with client_id=%s: %v", streamID, creds.ClientID, err)
 
 		// Личность сменилась - тот же client_id проходится заново с чистыми
