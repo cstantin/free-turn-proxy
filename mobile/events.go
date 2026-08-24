@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/session"
 )
 
@@ -55,6 +56,8 @@ func (observer) OnPhase(phase session.Phase, streams, total int, errMsg string) 
 		s.OnState(string(phase), streams, total, errMsg)
 	}
 }
+
+func coreLog() logx.Logger { return &sinkLogger{buf: sharedLogBuf} }
 
 // sinkLogger дублирует логи в кольцевой буфер и EventSink.
 type sinkLogger struct {

@@ -75,7 +75,7 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 				return
 			}
 			c := make(chan error, 1)
-			go oneTURN(ctx, deps, params, peer, pair.pipe, streamID, c)
+			go deps.guard(func() { oneTURN(ctx, deps, params, peer, pair.pipe, streamID, c) })()
 
 			var err error
 			select {
@@ -88,10 +88,7 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 			if err != nil {
 				if errors.Is(err, provider.ErrFatalNoStreams) {
 					deps.log().Errorf("[STREAM %d] Fatal provider error. Shutting down application.", streamID)
-					select {
-					case deps.fatalCh <- fmt.Errorf("%w: %w", ErrFatal, err):
-					default:
-					}
+					deps.fatal(err)
 					return
 				}
 				if errors.Is(err, provider.ErrBackoffActive) {

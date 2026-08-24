@@ -17,6 +17,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/udprelay"
 	"github.com/samosvalishe/free-turn-proxy/internal/routemgr"
+	"github.com/samosvalishe/free-turn-proxy/internal/safego"
 	"github.com/samosvalishe/free-turn-proxy/internal/stats"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/wake"
@@ -192,24 +193,36 @@ func (s *Session) Run(ctx context.Context) (err error) {
 	defer cancel()
 
 	var bg sync.WaitGroup
-	bg.Go(func() {
+	var bgErr atomic.Pointer[error]
+	guard := func(fn func()) func() {
+		return func() {
+			if err := safego.Run(log, fn); err != nil {
+				bgErr.CompareAndSwap(nil, &err)
+				cancel()
+			}
+		}
+	}
+	bg.Go(guard(func() {
 		wake.New().Watch(runCtx, wakeTick, wakeThreshold, func(gap time.Duration) {
 			log.Warnf("device slept for %s - checking TURN allocations", gap.Truncate(time.Second))
 			s.Wake()
 		})
-	})
-	bg.Go(func() { s.watchWake(runCtx) })
+	}))
+	bg.Go(guard(func() { s.watchWake(runCtx) }))
 
 	var watchdogErr error
-	bg.Go(func() {
+	bg.Go(guard(func() {
 		watchdogErr = s.watch(runCtx, cancel)
-	})
+	}))
 
 	relayErr := s.runRelayLoop(runCtx, prov, peer)
 	stopped := runCtx.Err() != nil
 	cancel()
 	bg.Wait()
 
+	if p := bgErr.Load(); p != nil {
+		return *p
+	}
 	if relayErr != nil && !stopped {
 		return relayErr
 	}
@@ -217,10 +230,15 @@ func (s *Session) Run(ctx context.Context) (err error) {
 }
 
 func (s *Session) runRelayLoop(ctx context.Context, prov provider.Provider, peer *net.UDPAddr) error {
+	return s.relayLoop(ctx, func(ctx context.Context) error { return s.relay(ctx, prov, peer) })
+}
+
+func (s *Session) relayLoop(ctx context.Context, attempt func(context.Context) error) error {
+	log := s.deps.Logger
 	for {
 		attemptCtx, attemptCancel := context.WithCancel(ctx)
 		done := make(chan error, 1)
-		go func() { done <- s.relay(attemptCtx, prov, peer) }()
+		go func() { done <- safego.Call(log, func() error { return attempt(attemptCtx) }) }()
 
 		var err error
 		select {

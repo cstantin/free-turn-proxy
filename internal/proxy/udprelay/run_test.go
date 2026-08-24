@@ -12,6 +12,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/netconn"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider"
+	"github.com/samosvalishe/free-turn-proxy/internal/safego"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
 )
 
@@ -88,5 +89,33 @@ func TestRunReturnsOnFatalProviderError(t *testing.T) {
 	}
 	if !last.IsZero() {
 		t.Fatalf("read deadline left at %v, want cleared", last)
+	}
+}
+
+// Паника в горутине стрима эквивалентна фатальной ошибке: продолжать релей нельзя, а
+// ронять процесс приложения (ядро линкуется в него) - тем более.
+func TestRunReturnsOnStreamPanic(t *testing.T) {
+	t.Parallel()
+	dialer, params, peer, local := runFatalDeps(t)
+	params.GetCreds = func(context.Context, int) (string, string, []string, error) {
+		panic("boom")
+	}
+
+	var connected atomic.Int32
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(context.Background(), dialer, stubAuth{}, logx.Nop(), &connected, nil, params, peer, local, 1)
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, safego.ErrPanic) {
+			t.Fatalf("err = %v, want ErrPanic", err)
+		}
+		if !errors.Is(err, ErrFatal) {
+			t.Fatalf("err = %v, want ErrFatal", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Run hung on panic in stream goroutine")
 	}
 }

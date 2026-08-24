@@ -2,12 +2,14 @@ package session
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/samosvalishe/free-turn-proxy/internal/config"
 	"github.com/samosvalishe/free-turn-proxy/internal/netconn"
+	"github.com/samosvalishe/free-turn-proxy/internal/safego"
 )
 
 func newTestSession(t *testing.T, opts Options, captcha func() bool) *Session {
@@ -303,5 +305,23 @@ func TestTrafficRates(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 	if tx, rx := tr.rates(); tx != 0 || rx != 0 {
 		t.Fatalf("idle rates = tx %d rx %d, want zero", tx, rx)
+	}
+}
+
+// Паника в попытке релея не должна валить процесс приложения: ядро - библиотека внутри
+// процесса UI, перехватить снаружи нечем.
+func TestRelayLoopTurnsPanicIntoError(t *testing.T) {
+	s := newTestSession(t, Options{}, nil)
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- s.relayLoop(context.Background(), func(context.Context) error { panic("boom") }) }()
+
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, safego.ErrPanic) {
+			t.Fatalf("relayLoop() error = %v, want ErrPanic", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("relayLoop() hung on panic")
 	}
 }

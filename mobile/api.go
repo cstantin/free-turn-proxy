@@ -14,6 +14,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/client/dnsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/config"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk"
+	"github.com/samosvalishe/free-turn-proxy/internal/safego"
 	"github.com/samosvalishe/free-turn-proxy/internal/session"
 	"github.com/samosvalishe/free-turn-proxy/internal/statedir"
 	"github.com/samosvalishe/free-turn-proxy/internal/sub"
@@ -193,7 +194,7 @@ func closeTunnel(t *tunnelParts) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		t.close()
+		_ = safego.Run(coreLog(), t.close)
 	}()
 	waitDone(done, tunnelCloseTimeout)
 }
@@ -305,7 +306,7 @@ func startLocked(configJSON string, tunFD int, withTunnel bool) error {
 
 	go func() {
 		defer close(l.done)
-		runErr := sess.Run(ctx)
+		runErr := safego.Call(logger, func() error { return sess.Run(ctx) })
 		cancel()
 
 		// Публикация до CAS для синхронизации с параллельным Stop.
