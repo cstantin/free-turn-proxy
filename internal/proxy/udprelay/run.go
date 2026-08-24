@@ -60,12 +60,6 @@ func (d *Deps) log() logx.Logger {
 
 // Run запускает прием входящего UDP-трафика и распределяет его по пулу пар DTLSLoop/TURNLoop.
 func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, logger logx.Logger, connectedStreams *atomic.Int32, onTURNServer func(net.IP), params *Params, peer *net.UDPAddr, listenConn net.PacketConn, numStreams int) error {
-	context.AfterFunc(ctx, func() {
-		if err := listenConn.SetReadDeadline(time.Now()); err != nil {
-			logger.Errorf("udprelay: set listen deadline: %s", err)
-		}
-	})
-
 	if numStreams <= 0 {
 		numStreams = 1
 	}
@@ -84,6 +78,15 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
+
+	deadlineSet := make(chan struct{})
+	go func() {
+		defer close(deadlineSet)
+		<-runCtx.Done()
+		if err := listenConn.SetReadDeadline(time.Now()); err != nil {
+			logger.Errorf("udprelay: set listen deadline: %s", err)
+		}
+	}()
 
 	inboundChan := make(chan *Packet, inboundQueueCap)
 	wg := sync.WaitGroup{}
@@ -133,12 +136,11 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 	}()
 
 	wg.Wait()
-	// Сбрасываем дедлайн, чтобы listenConn можно было переиспользовать
-	// в следующей итерации runRelayLoop (актуально для LocalPipe).
+	runCancel()
+	<-deadlineSet
 	if err := listenConn.SetReadDeadline(time.Time{}); err != nil {
 		logger.Errorf("udprelay: clear listen deadline: %s", err)
 	}
-	runCancel()
 	<-watcherDone
 	if p := fatalErr.Load(); p != nil {
 		return *p
