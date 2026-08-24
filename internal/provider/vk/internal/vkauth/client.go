@@ -192,6 +192,14 @@ func (c *Client) ResetErrors(streamID int) {
 	c.store.Get(streamID).errorCount.Store(0)
 }
 
+func (c *Client) DropCredentials(streamID int) {
+	if !c.store.Get(streamID).Invalidate() {
+		return
+	}
+	c.log.Warnf("[STREAM %d] [VK Auth] Deallocate unconfirmed - credentials dropped (cache=%d)",
+		streamID, c.store.CacheID(streamID))
+}
+
 func (c *Client) LockoutUntilUnix() int64 {
 	return c.lockout.Load()
 }

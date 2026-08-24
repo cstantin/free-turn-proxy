@@ -75,6 +75,8 @@ func (p *Provider) HandleAuthError(streamID int) bool { return p.auth.HandleAuth
 
 func (p *Provider) ResetErrors(streamID int) { p.auth.ResetErrors(streamID) }
 
+func (p *Provider) DropCredentials(streamID int) { p.auth.DropCredentials(streamID) }
+
 func (p *Provider) BackoffUntilUnix() int64 { return p.auth.BackoffUntilUnix() }
 
 func (*Provider) Name() string { return "vk" }

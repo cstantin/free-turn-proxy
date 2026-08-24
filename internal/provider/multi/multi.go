@@ -46,6 +46,11 @@ func (m *Provider) ResetErrors(streamID int) {
 	p.ResetErrors(innerID)
 }
 
+func (m *Provider) DropCredentials(streamID int) {
+	p, innerID := m.providerFor(streamID)
+	p.DropCredentials(innerID)
+}
+
 func (m *Provider) BackoffUntilUnix() int64 {
 	var until int64
 	for _, p := range m.providers {

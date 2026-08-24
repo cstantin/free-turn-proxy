@@ -21,6 +21,7 @@ type Provider interface {
 	IsAuthError(err error) bool
 	HandleAuthError(streamID int) bool
 	ResetErrors(streamID int)
+	DropCredentials(streamID int)
 	BackoffUntilUnix() int64
 	Name() string
 }

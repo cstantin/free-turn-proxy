@@ -252,9 +252,8 @@ func oneTURN(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr,
 		cerr := stream.Close()
 		deps.log().Infof("[STREAM %d] TURN allocation released: relayed=%s deallocate=%v",
 			streamID, relayedAddr, cerr)
-		// Ошибку закрытия не ставим поверх причины выхода - она уже сказала, почему стрим упал.
-		if cerr != nil && err == nil {
-			err = fmt.Errorf("failed to close TURN stream: %w", cerr)
+		if cerr != nil {
+			deps.Auth.DropCredentials(streamID)
 		}
 	}()
 

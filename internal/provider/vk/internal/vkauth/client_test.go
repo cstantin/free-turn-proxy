@@ -31,14 +31,15 @@ func TestIsAuthError(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]bool{
-		"401 Unauthorized":              true,
-		"alloc failed: 401":             true,
-		"stale nonce":                   true,
-		"invalid credential":            true,
-		"authentication required":       true,
-		"486: Allocation Quota Reached": true,
-		"connection refused":            false,
-		"":                              false,
+		"401 Unauthorized":                     true,
+		"alloc failed: 401":                    true,
+		"stale nonce":                          true,
+		"invalid credential":                   true,
+		"authentication required":              true,
+		"486: Allocation Quota Reached":        true,
+		"connection refused":                   false,
+		"dial tcp 10.0.0.1:48612: i/o timeout": false,
+		"":                                     false,
 	}
 	for msg, want := range cases {
 		got := IsAuthError(errors.New(msg))
@@ -220,5 +221,28 @@ func TestThrottleHonorsContextCancel(t *testing.T) {
 	_, _, _, err := c.GetCredentials(ctx, "L2", 100) // different cache group -> miss cache
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestDropCredentialsClearsCacheOnce(t *testing.T) {
+	t.Parallel()
+	c := newTestClient(t, nil)
+
+	cache := c.store.Get(1)
+	cache.creds = TurnCredentials{
+		Username:    "u",
+		Password:    "p",
+		ServerAddrs: []string{"turn:1.2.3.4:19302"},
+		ExpiresAt:   time.Now().Add(time.Minute),
+		Link:        "l",
+	}
+
+	c.DropCredentials(1)
+	if cache.creds.Username != "" {
+		t.Fatal("credentials survived DropCredentials")
+	}
+	// Второй стрим того же кэша не должен повторять сброс: иначе один обрыв даёт N строк.
+	if cache.Invalidate() {
+		t.Fatal("empty cache reported as invalidated")
 	}
 }

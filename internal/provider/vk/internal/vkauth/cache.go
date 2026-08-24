@@ -60,13 +60,15 @@ func (s *Store) Get(streamID int) *StreamCredentialsCache {
 	return cache
 }
 
-func (c *StreamCredentialsCache) Invalidate() {
+func (c *StreamCredentialsCache) Invalidate() bool {
 	c.mutex.Lock()
+	had := c.creds.Username != ""
 	c.creds = TurnCredentials{}
 	c.mutex.Unlock()
 
 	c.errorCount.Store(0)
 	c.lastErrorTime.Store(0)
+	return had
 }
 
 func IsAuthError(err error) bool {
@@ -79,5 +81,5 @@ func IsAuthError(err error) bool {
 		strings.Contains(s, "authentication") ||
 		strings.Contains(s, "invalid credential") ||
 		strings.Contains(s, "stale nonce") ||
-		strings.Contains(s, "486")
+		strings.Contains(s, "Allocation Quota")
 }
