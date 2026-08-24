@@ -68,10 +68,7 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 		case <-ctx.Done():
 			return
 		case pair := <-connchan:
-			// Джиттер разводит Allocate соседних стримов во времени.
-			select {
-			case <-time.After(time.Duration(randx.Intn(400)+100) * time.Millisecond):
-			case <-ctx.Done():
+			if !deps.allocPace.wait(ctx) {
 				return
 			}
 			c := make(chan error, 1)
