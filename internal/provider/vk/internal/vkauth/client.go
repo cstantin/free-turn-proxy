@@ -93,7 +93,7 @@ func New(cfg Config) *Client {
 	c.identity = browserprofile.Identity{Seed: seed, Gen: c.gens.load(seed)}
 	c.persona = browserprofile.For(c.platform, c.identity)
 	if c.identity.Gen > 0 {
-		c.log.Infof("[VK Auth] Persona gen=%d restored | User-Agent: %s", c.identity.Gen, c.persona.UserAgent)
+		c.log.Debugf("[VK Auth] Persona gen=%d restored | User-Agent: %s", c.identity.Gen, c.persona.UserAgent)
 	}
 	return c
 }
@@ -241,11 +241,11 @@ func (c *Client) fetch(ctx context.Context, link string, streamID int) (string, 
 	jar := personanet.NewCookieJar()
 	for i := 0; i < len(c.credentials); {
 		creds := c.credentials[i]
-		c.log.Infof("[STREAM %d] [VK Auth] Trying credentials: client_id=%s", streamID, creds.ClientID)
+		c.log.Debugf("[STREAM %d] [VK Auth] Trying credentials: client_id=%s", streamID, creds.ClientID)
 
 		user, pass, addrs, err := c.tokenChain(ctx, link, streamID, creds, jar)
 		if err == nil {
-			c.log.Infof("[STREAM %d] [VK Auth] Success with client_id=%s", streamID, creds.ClientID)
+			c.log.Debugf("[STREAM %d] [VK Auth] Success with client_id=%s", streamID, creds.ClientID)
 			return user, pass, addrs, nil
 		}
 		lastErr = err

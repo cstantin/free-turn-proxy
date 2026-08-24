@@ -21,7 +21,7 @@ func (c *Client) getTokenChain(ctx context.Context, link string, streamID int, c
 	name := namegen.Generate()
 	escapedName := neturl.QueryEscape(name)
 
-	c.log.Infof("[STREAM %d] [VK Auth] Connecting Identity - Name: %s | User-Agent: %s", streamID, name, profile.UserAgent)
+	c.log.Debugf("[STREAM %d] [VK Auth] Connecting Identity - Name: %s | User-Agent: %s", streamID, name, profile.UserAgent)
 
 	if pageErr := c.openJoinPage(ctx, httpClient, profile, link); pageErr != nil {
 		c.log.Warnf("[STREAM %d] [VK Auth] join page warm-up failed: %v", streamID, pageErr)

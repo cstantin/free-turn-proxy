@@ -160,9 +160,9 @@ func dtlsSession(dtlsctx context.Context, dtlscancel context.CancelFunc, deps *D
 	var dtlsConn net.Conn = dtlsRaw
 	defer func() {
 		_ = dtlsConn.Close()
-		deps.log().Infof("[STREAM %d] Closed DTLS connection", streamID)
+		deps.log().Debugf("[STREAM %d] Closed DTLS connection", streamID)
 	}()
-	deps.log().Infof("[STREAM %d] Established DTLS connection", streamID)
+	deps.log().Debugf("[STREAM %d] Established DTLS connection", streamID)
 
 	if err := clientsdb.WriteClientID(dtlsConn, params.ClientID); err != nil {
 		return fmt.Errorf("failed to write client ID: %w", err)
