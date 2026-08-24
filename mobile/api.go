@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/samosvalishe/free-turn-proxy/internal/client/dnsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/config"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk"
 	"github.com/samosvalishe/free-turn-proxy/internal/session"
@@ -153,6 +154,18 @@ func Wake() {
 	if l := current.Load(); l != nil {
 		l.sess.Wake()
 	}
+}
+
+// Reconnect пересоздаёт TURN-аллокации, не трогая туннель и tun-дескриптор.
+func Reconnect() {
+	if l := current.Load(); l != nil {
+		l.sess.Reconnect()
+	}
+}
+
+// SetDNSServers подменяет UDP-резолверы на лету, без перезапуска сессии.
+func SetDNSServers(servers string) {
+	dnsdial.SetUDPDNSServers(strings.Split(servers, ","))
 }
 
 func stopLocked() {

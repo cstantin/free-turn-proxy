@@ -250,9 +250,13 @@ func (s *Session) Wake() {
 	}
 }
 
-// Рецикл только по факту тишины: сон сам по себе аллокацию не убивает (lifetime 600 c),
-// а keepalive туннеля идёт через тот же relay и растит Rx. Заодно схлопывает каскад -
-// гэп-детектор ядра и SCREEN_ON с платформы приходят почти одновременно.
+func (s *Session) Reconnect() {
+	select {
+	case s.reconnectCh <- struct{}{}:
+	default:
+	}
+}
+
 func (s *Session) watchWake(ctx context.Context) {
 	for {
 		select {
@@ -261,10 +265,7 @@ func (s *Session) watchWake(ctx context.Context) {
 		case <-s.wakeCh:
 		}
 		if s.wakeNeedsRecycle(ctx) {
-			select {
-			case s.reconnectCh <- struct{}{}:
-			default:
-			}
+			s.Reconnect()
 		}
 	}
 }
