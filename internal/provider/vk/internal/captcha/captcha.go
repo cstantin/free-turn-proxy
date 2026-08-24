@@ -42,6 +42,8 @@ var (
 	errCaptchaRateLimit = errors.New("captcha session rate limit reached")
 	errCaptchaBot       = errors.New("captcha bot challenge")
 
+	ErrUnavailable = errors.New("captcha unavailable")
+
 	captchaMaxAttempts = 2
 )
 
@@ -148,12 +150,14 @@ func Solve(
 		started:   time.Now(),
 	}
 
+	var solveErr error
 	for attempt := 1; attempt <= captchaMaxAttempts; attempt++ {
-		token, solveErr := s.solveOnce(captchaErr)
+		var token string
+		token, solveErr = s.solveOnce(captchaErr)
 		if solveErr == nil {
 			return token, nil
 		}
-		l.Warnf("[STREAM %d] [Captcha] solve attempt %d failed: %v", streamID, attempt, solveErr)
+		l.Debugf("[STREAM %d] [Captcha] solve attempt %d failed: %v", streamID, attempt, solveErr)
 		// Повторяем только то, что не дошло до check.
 		if s.checked || errors.Is(solveErr, errCaptchaRateLimit) || errors.Is(solveErr, errCaptchaBot) {
 			return "", solveErr
@@ -168,7 +172,7 @@ func Solve(
 		case <-timer.C:
 		}
 	}
-	return "", fmt.Errorf("captcha attempts exhausted")
+	return "", fmt.Errorf("captcha attempts exhausted: %w", solveErr)
 }
 
 func (s *captchaSession) solveOnce(captchaErr *Error) (string, error) {
@@ -184,7 +188,7 @@ func (s *captchaSession) solveOnce(captchaErr *Error) (string, error) {
 
 	page, err := parseCaptchaPage(html)
 	if err != nil {
-		s.logger().Warnf("[Captcha] page parse failed: %v; pow script near: %s", err, powSnippet(html))
+		s.logger().Debugf("[Captcha] page parse failed: %v (bytes=%d); pow script near: %s", err, len(html), powSnippet(html))
 		return "", err
 	}
 
@@ -384,7 +388,7 @@ func captchaDomainFromRedirectURI(redirectURI string) string {
 }
 
 func (s *captchaSession) fetchCaptchaHTML(redirectURI string) (string, error) {
-	body, err := s.doRaw(fhttp.MethodGet, redirectURI, nil, map[string]string{
+	body, status, err := s.doRawStatus(fhttp.MethodGet, redirectURI, nil, map[string]string{
 		"Accept":                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 		"Upgrade-Insecure-Requests": "1",
 		"Sec-Fetch-Dest":            "document",
@@ -398,17 +402,20 @@ func (s *captchaSession) fetchCaptchaHTML(redirectURI string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if status < 200 || status > 299 {
+		return "", fmt.Errorf("%w: captcha page http %d (bytes=%d)", ErrUnavailable, status, len(body))
+	}
 	return string(body), nil
 }
 
 func parseCaptchaPage(html string) (*captchaPage, error) {
 	pow, err := parsePowParams(html)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	debugInfo := parseCaptchaDebugInfo(html)
 	if debugInfo == "" {
-		return nil, errors.New("captcha debug_info not found on page")
+		return nil, fmt.Errorf("%w: captcha debug_info not found on page", ErrUnavailable)
 	}
 	return &captchaPage{Pow: pow, DebugInfo: debugInfo, Init: parseCaptchaInitGlobal(html)}, nil
 }
@@ -661,13 +668,23 @@ func (s *captchaSession) doRaw(
 	form [][2]string,
 	extraHeaders map[string]string,
 ) ([]byte, error) {
+	data, _, err := s.doRawStatus(method, endpoint, form, extraHeaders)
+	return data, err
+}
+
+func (s *captchaSession) doRawStatus(
+	method string,
+	endpoint string,
+	form [][2]string,
+	extraHeaders map[string]string,
+) ([]byte, int, error) {
 	var body []byte
 	if form != nil {
 		body = []byte(captchaEncodeForm(form))
 	}
 	req, err := fhttp.NewRequestWithContext(s.ctx, method, endpoint, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Header.Set("Accept", "*/*")
 	req.Header.Set("Sec-Fetch-Site", "same-site")
@@ -689,7 +706,7 @@ func (s *captchaSession) doRaw(
 	resp, err := s.client.Do(req)
 	if err != nil {
 		s.logger().Debugf("[Captcha] http %s %s failed t=%s after=%s %s form=%s err=%v", method, SafeURL(endpoint), s.elapsed(), time.Since(start).Truncate(time.Millisecond), navSummary(req), captchaFormSummary(form), err)
-		return nil, err
+		return nil, 0, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer func() {
 		if closeErr := resp.Body.Close(); closeErr != nil {
@@ -698,7 +715,10 @@ func (s *captchaSession) doRaw(
 	}()
 	data, readErr := io.ReadAll(resp.Body)
 	s.logger().Debugf("[Captcha] http %s %s status=%d bytes=%d t=%s after=%s %s form=%s", method, SafeURL(endpoint), resp.StatusCode, len(data), s.elapsed(), time.Since(start).Truncate(time.Millisecond), navSummary(req), captchaFormSummary(form))
-	return data, readErr
+	if readErr != nil {
+		return nil, resp.StatusCode, fmt.Errorf("%w: %w", ErrUnavailable, readErr)
+	}
+	return data, resp.StatusCode, nil
 }
 
 // Навигационный контекст: с какой страницы виджет якобы ходит в API. Формат

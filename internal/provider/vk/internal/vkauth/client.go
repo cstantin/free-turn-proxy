@@ -12,6 +12,7 @@ import (
 
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/browserprofile"
+	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/captcha"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/personanet"
 	"github.com/samosvalishe/free-turn-proxy/internal/randx"
 
@@ -270,7 +271,7 @@ func (c *Client) fetch(ctx context.Context, link string, streamID int) (string, 
 
 		if errors.Is(err, ErrCaptchaWaitRequired) || errors.Is(err, ErrFatalCaptchaNoStreams) ||
 			errors.Is(err, ErrInvalidJoinLink) || errors.Is(err, ErrAnonymousBlocked) ||
-			errors.Is(err, ErrCallFull) {
+			errors.Is(err, ErrCallFull) || errors.Is(err, captcha.ErrUnavailable) {
 			return "", "", nil, err
 		}
 		es := err.Error()

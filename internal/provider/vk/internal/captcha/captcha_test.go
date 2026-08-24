@@ -1,6 +1,7 @@
 package captcha
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -267,5 +268,13 @@ func TestParseCaptchaDebugInfoAmbiguous(t *testing.T) {
 	html := `<script>window.vk = {a: "273cc83f-426f-4d98-9ce5-92490107e3a6", b: "ec772ebb-0d69-4fa0-b974-904549c8a7d1"};</script>`
 	if got := parseCaptchaDebugInfo(html); got != "273cc83f-426f-4d98-9ce5-92490107e3a6" {
 		t.Fatalf("debug_info = %q", got)
+	}
+}
+
+func TestParseCaptchaPageRejectsNonCaptchaHTML(t *testing.T) {
+	t.Parallel()
+	_, err := parseCaptchaPage("<html><head><title>429 Too Many Requests</title></head><body></body></html>")
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}
 }
