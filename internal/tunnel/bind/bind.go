@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/amnezia-vpn/amneziawg-go/conn"
+	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
 
 	"github.com/samosvalishe/free-turn-proxy/internal/tunnel"
 )

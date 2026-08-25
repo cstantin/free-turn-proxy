@@ -7,7 +7,7 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/amnezia-vpn/amneziawg-go/tun"
+	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
 )
 
 // openTUN оборачивает готовый дескриптор tun-интерфейса. Создаёт его платформа

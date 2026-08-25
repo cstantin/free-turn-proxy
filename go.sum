@@ -1,7 +1,7 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/amnezia-vpn/amneziawg-go v0.2.19 h1:l3rOmrA4o5z38kpgnA5iSk1yOm7Cv3AafIi4vxpSEV0=
-github.com/amnezia-vpn/amneziawg-go v0.2.19/go.mod h1:aMgOk9MuX0xI7b5TKAYp8pLM54RlXcOPzDvYw3YEO5A=
+github.com/amnezia-vpn/amneziawg-go/v3 v3.1.20260814 h1:l2AhBD+sFycU8Im81n/bZORMxW7fWtlZJEuJ4Hh0+z0=
+github.com/amnezia-vpn/amneziawg-go/v3 v3.1.20260814/go.mod h1:YoPc6qcOZqD7TXZ1xpedD8Sx3aSKsxN05ZqEFmXDNHk=
 github.com/andybalholm/brotli v1.2.2 h1:HzTuoo2ErYQqf5qvcJInB8uvqSVxRttzkFexPWtnceM=
 github.com/andybalholm/brotli v1.2.2/go.mod h1:rzTDkvFWvIrjDXZHkuS16NPggd91W3kUSvPlQ1pLaKY=
 github.com/bdandy/go-errors v1.2.2 h1:WdFv/oukjTJCLa79UfkGmwX7ZxONAihKu4V0mLIs11Q=
