@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"strconv"
+	"strings"
 )
 
 // DefaultMTU - безопасный MTU для WireGuard поверх TURN без фрагментации.
@@ -34,7 +36,11 @@ type Config struct {
 	Amnezia    AmneziaParams
 }
 
+// MinHeaderProtectionPadding - минимум S1-S4, из которого AWG берёт nonce для защиты заголовка.
+const MinHeaderProtectionPadding = 12
+
 // AmneziaParams содержит параметры обфускации протокола AmneziaWG.
+// Range-поля пустые либо в формате "N" / "LO-HI".
 type AmneziaParams struct {
 	Jc   int
 	Jmin int
@@ -51,6 +57,17 @@ type AmneziaParams struct {
 	H4 string
 
 	I [5]string
+
+	// AWG 3+.
+	HeaderProtectionKey    Key
+	ContentPaddingAddition string
+	RekeyAfterTime         string
+	RekeyTimeout           string
+	RejectAfterTime        string
+	KeepaliveTimeout       string
+	MaxHandshakeAttempts   string
+	RandomTrailers         bool
+	DisableCookies         bool
 }
 
 func (p AmneziaParams) Enabled() bool { return p != AmneziaParams{} }
@@ -110,6 +127,59 @@ func (p AmneziaParams) validate() error {
 		if v < 0 {
 			return errors.New("tunnel: amnezia padding must not be negative")
 		}
+	}
+	return p.validateAWG3()
+}
+
+func (p AmneziaParams) validateAWG3() error {
+	ranges := []struct {
+		name string
+		val  string
+	}{
+		{"H1", p.H1}, {"H2", p.H2}, {"H3", p.H3}, {"H4", p.H4},
+		{"ContentPaddingAddition", p.ContentPaddingAddition},
+		{"RekeyAfterTime", p.RekeyAfterTime},
+		{"RekeyTimeout", p.RekeyTimeout},
+		{"RejectAfterTime", p.RejectAfterTime},
+		{"KeepaliveTimeout", p.KeepaliveTimeout},
+		{"MaxHandshakeAttempts", p.MaxHandshakeAttempts},
+	}
+	for _, r := range ranges {
+		if err := ValidateRange(r.val); err != nil {
+			return fmt.Errorf("tunnel: amnezia %s: %w", r.name, err)
+		}
+	}
+	if p.HeaderProtectionKey.IsZero() {
+		return nil
+	}
+	// Защита заголовка берёт nonce из crypto-паддинга, короткого ей не хватает.
+	for _, v := range []int{p.S1, p.S2, p.S3, p.S4} {
+		if v < MinHeaderProtectionPadding {
+			return fmt.Errorf("tunnel: amnezia HeaderProtectionKey requires S1-S4 >= %d", MinHeaderProtectionPadding)
+		}
+	}
+	return nil
+}
+
+// ValidateRange проверяет формат диапазона AWG ("N" или "LO-HI"); пустая строка - не задан.
+func ValidateRange(s string) error {
+	if s == "" {
+		return nil
+	}
+	lo, hi, hasHi := strings.Cut(s, "-")
+	low, err := strconv.ParseUint(lo, 10, 32)
+	if err != nil {
+		return fmt.Errorf("bad lower bound %q", lo)
+	}
+	if !hasHi {
+		return nil
+	}
+	high, err := strconv.ParseUint(hi, 10, 32)
+	if err != nil {
+		return fmt.Errorf("bad upper bound %q", hi)
+	}
+	if high < low {
+		return fmt.Errorf("upper bound %d below lower %d", high, low)
 	}
 	return nil
 }

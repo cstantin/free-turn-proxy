@@ -69,6 +69,12 @@ func writeAmnezia(line func(k, v string), p AmneziaParams) {
 		val string
 	}{
 		{"h1", p.H1}, {"h2", p.H2}, {"h3", p.H3}, {"h4", p.H4},
+		{"content_padding_addition", p.ContentPaddingAddition},
+		{"rekey_after_time", p.RekeyAfterTime},
+		{"rekey_timeout", p.RekeyTimeout},
+		{"reject_after_time", p.RejectAfterTime},
+		{"keepalive_timeout", p.KeepaliveTimeout},
+		{"max_handshake_attempts", p.MaxHandshakeAttempts},
 	}
 	for _, kv := range strKeys {
 		if kv.val != "" {
@@ -79,5 +85,15 @@ func writeAmnezia(line func(k, v string), p AmneziaParams) {
 		if spec != "" {
 			line("i"+strconv.Itoa(i+1), spec)
 		}
+	}
+	if !p.HeaderProtectionKey.IsZero() {
+		line("header_protection_key", hex.EncodeToString(p.HeaderProtectionKey[:]))
+	}
+	// Булевы шлём только во включённом виде - device и так стартует с false.
+	if p.RandomTrailers {
+		line("random_trailers", "true")
+	}
+	if p.DisableCookies {
+		line("disable_cookies", "true")
 	}
 }

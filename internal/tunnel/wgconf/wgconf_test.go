@@ -202,3 +202,56 @@ func TestParseFeedsUAPI(t *testing.T) {
 		t.Errorf("UAPI() = %s", uapi)
 	}
 }
+
+func TestParseAWG3Params(t *testing.T) {
+	hpKey := base64.StdEncoding.EncodeToString(bytesOf(0x04))
+	text := "[Interface]\nPrivateKey = " + privKey + "\nAddress = 10.8.0.2/32\n" +
+		"S1 = 12\nS2 = 12\nS3 = 12\nS4 = 12\n" +
+		"HeaderProtectionKey = " + hpKey + "\n" +
+		"ContentPaddingAddition = 10-40\n" +
+		"RekeyAfterTime = 90-140\nRekeyTimeout = 5\nRejectAfterTime = 180\n" +
+		"KeepaliveTimeout = 10-15\nMaxHandshakeAttempts = 18\n" +
+		"RandomTrailers = true\nDisableCookies = 1\n\n" +
+		"[Peer]\nPublicKey = " + pubKey + "\nAllowedIPs = 0.0.0.0/0\n"
+
+	cfg, err := Parse(text)
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	p := cfg.Amnezia
+	if p.HeaderProtectionKey != tunnel.Key(bytesOf(0x04)) {
+		t.Error("HeaderProtectionKey not parsed")
+	}
+	for _, kv := range []struct{ got, want string }{
+		{p.ContentPaddingAddition, "10-40"},
+		{p.RekeyAfterTime, "90-140"},
+		{p.RekeyTimeout, "5"},
+		{p.RejectAfterTime, "180"},
+		{p.KeepaliveTimeout, "10-15"},
+		{p.MaxHandshakeAttempts, "18"},
+	} {
+		if kv.got != kv.want {
+			t.Errorf("range = %q, want %q", kv.got, kv.want)
+		}
+	}
+	if !p.RandomTrailers || !p.DisableCookies {
+		t.Errorf("bool flags = %v/%v, want true/true", p.RandomTrailers, p.DisableCookies)
+	}
+}
+
+func TestParseAWG3Errors(t *testing.T) {
+	base := "[Interface]\nPrivateKey = " + privKey + "\nAddress = 10.8.0.2/32\n"
+	peer := "\n[Peer]\nPublicKey = " + pubKey + "\nAllowedIPs = 0.0.0.0/0\n"
+
+	for name, line := range map[string]string{
+		"bad range":      "RekeyTimeout = 40-10\n",
+		"non-numeric":    "KeepaliveTimeout = soon\n",
+		"bad bool":       "RandomTrailers = maybe\n",
+		"short hp key":   "HeaderProtectionKey = " + base64.StdEncoding.EncodeToString([]byte("short")) + "\n",
+		"hp without pad": "HeaderProtectionKey = " + base64.StdEncoding.EncodeToString(bytesOf(0x04)) + "\n",
+	} {
+		if _, err := Parse(base + line + peer); err == nil {
+			t.Errorf("%s: Parse() = nil, want error", name)
+		}
+	}
+}

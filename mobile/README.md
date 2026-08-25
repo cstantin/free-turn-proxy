@@ -84,6 +84,19 @@ JSON парсится с `DisallowUnknownFields`, поэтому конфиг с
 
 Текст WireGuard-конфигурации (`wg-quick`) передается в `tunnel.config`. В режиме `wg` параметры обфускации AmneziaWG игнорируются. Поле `Endpoint` из конфига не используется, так как трафик идет через TURN-релей.
 
+В секции `[Interface]` понимаются параметры AmneziaWG: `Jc`/`Jmin`/`Jmax`, `S1`-`S4`, `H1`-`H4`, `I1`-`I5`, а также AWG 3+:
+
+| Ключ | Значение | Должен совпадать с сервером |
+|---|---|---|
+| `HeaderProtectionKey` | base64-ключ 32 байта | да |
+| `ContentPaddingAddition` | `N` или `LO-HI` | нет |
+| `RekeyAfterTime`, `RekeyTimeout`, `RejectAfterTime`, `KeepaliveTimeout` | `N` или `LO-HI`, секунды | нет |
+| `MaxHandshakeAttempts` | `N` или `LO-HI`, попытки | нет |
+| `RandomTrailers` | bool | да |
+| `DisableCookies` | bool | нет |
+
+`HeaderProtectionKey` берёт nonce из crypto-паддинга, поэтому требует `S1`-`S4` не меньше 12 - иначе конфиг отклоняется.
+
 Адреса, DNS, маршруты и MTU tun-интерфейса ядро не применяет - это работа платформы. Их отдаёт `ParseTunnelConfig` из того же текста, что уходит в `tunnel.config` (аргумент `mtu` - то же значение, что в `tunnel.mtu`; `0` - взять из конфига):
 
 ```kotlin

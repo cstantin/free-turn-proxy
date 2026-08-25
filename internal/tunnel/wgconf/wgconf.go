@@ -123,10 +123,49 @@ func applyInterface(cfg *tunnel.Config, key, value string) error {
 	case "i1", "i2", "i3", "i4", "i5":
 		idx := int(key[1] - '1')
 		cfg.Amnezia.I[idx] = value
+	case "headerprotectionkey":
+		k, err := parseKey(value)
+		if err != nil {
+			return fmt.Errorf("headerprotectionkey: %w", err)
+		}
+		cfg.Amnezia.HeaderProtectionKey = k
+	case "contentpaddingaddition", "rekeyaftertime", "rekeytimeout",
+		"rejectaftertime", "keepalivetimeout", "maxhandshakeattempts":
+		if err := tunnel.ValidateRange(value); err != nil {
+			return fmt.Errorf("%s: %w", key, err)
+		}
+		setAmneziaRange(&cfg.Amnezia, key, value)
+	case "randomtrailers", "disablecookies":
+		b, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("%s: %w", key, err)
+		}
+		if key == "randomtrailers" {
+			cfg.Amnezia.RandomTrailers = b
+		} else {
+			cfg.Amnezia.DisableCookies = b
+		}
 	default:
 		return fmt.Errorf("unknown [Interface] key %q", key)
 	}
 	return nil
+}
+
+func setAmneziaRange(p *tunnel.AmneziaParams, key, value string) {
+	switch key {
+	case "contentpaddingaddition":
+		p.ContentPaddingAddition = value
+	case "rekeyaftertime":
+		p.RekeyAfterTime = value
+	case "rekeytimeout":
+		p.RekeyTimeout = value
+	case "rejectaftertime":
+		p.RejectAfterTime = value
+	case "keepalivetimeout":
+		p.KeepaliveTimeout = value
+	case "maxhandshakeattempts":
+		p.MaxHandshakeAttempts = value
+	}
 }
 
 func setAmneziaInt(p *tunnel.AmneziaParams, key string, n int) {
