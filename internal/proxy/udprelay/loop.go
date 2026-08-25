@@ -68,7 +68,7 @@ func TURNLoop(ctx context.Context, deps *Deps, params *Params, peer *net.UDPAddr
 		case <-ctx.Done():
 			return
 		case pair := <-connchan:
-			if !deps.allocPace.wait(ctx) {
+			if !deps.allocPace.Wait(ctx) {
 				return
 			}
 			c := make(chan error, 1)
@@ -158,7 +158,7 @@ func dtlsSession(dtlsctx context.Context, dtlscancel context.CancelFunc, deps *D
 	}()
 	deps.log().Debugf("[STREAM %d] Established DTLS connection", streamID)
 
-	if err := clientsdb.WriteClientID(dtlsConn, params.ClientID); err != nil {
+	if err := clientsdb.WriteClientID(dtlsConn, params.ClientID, clientsdb.ModeUDP); err != nil {
 		return fmt.Errorf("failed to write client ID: %w", err)
 	}
 	if okchan != nil {

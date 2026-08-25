@@ -43,6 +43,10 @@ func ClientArgs(c *Client) []string {
 	if c.TURN.TransportUDP != def.TURN.TransportUDP {
 		add("-transport", TransportUDP)
 	}
+	if c.Proxy.Mode != def.Proxy.Mode {
+		add("-mode", string(c.Proxy.Mode))
+	}
+	args = append(args, kcpArgs(c.KCP.Profile, def.KCP.Profile)...)
 	if c.Obf.Enabled() {
 		add("-obf-profile", string(c.Obf.Profile))
 		add("-obf-key", hex.EncodeToString(c.Obf.Key))

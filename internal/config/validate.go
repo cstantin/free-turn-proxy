@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcpmux"
 	"github.com/samosvalishe/free-turn-proxy/internal/tunnel"
 )
 
@@ -43,19 +44,49 @@ func Validate(c *Client) error {
 	if err := validateObfProfile(c.Obf.Profile); err != nil {
 		return err
 	}
-	if err := validateTunnel(c.Tunnel); err != nil {
+	if err := validateProxyMode(c.Proxy.Mode); err != nil {
+		return err
+	}
+	if err := validateTunnel(c.Tunnel, c.Proxy.Mode); err != nil {
+		return err
+	}
+	if err := validateKCPFor(c.KCP, c.Proxy.Mode); err != nil {
 		return err
 	}
 	return validateObfTiming(c.Obf)
 }
 
-func validateTunnel(t TunnelOpts) error {
+func validateProxyMode(m ProxyMode) error {
+	switch m {
+	case ProxyModeUDP, ProxyModeTCP:
+		return nil
+	default:
+		return fmt.Errorf("invalid -mode value %q: must be %s | %s", m, ProxyModeUDP, ProxyModeTCP)
+	}
+}
+
+// validateKCPFor: -kcp-* настраивают ARQ, который живёт только в tcp-режиме.
+func validateKCPFor(k KCPOpts, mode ProxyMode) error {
+	if mode != ProxyModeTCP {
+		if k.Profile != kcpmux.DefaultProfile() {
+			return errors.New("-kcp-* supported only with -mode tcp")
+		}
+		return nil
+	}
+	return validateKCP(k.Profile)
+}
+
+// validateTunnel: встроенный WG гонит датаграммы, tcp-режим их не переносит.
+func validateTunnel(t TunnelOpts, mode ProxyMode) error {
 	if t.Mode != "" && !t.Mode.Valid() {
 		return fmt.Errorf("invalid tunnel mode %q: must be %s | %s | %s",
 			t.Mode, tunnel.ModeNone, tunnel.ModeWG, tunnel.ModeAWG)
 	}
 	if !t.Enabled() {
 		return nil
+	}
+	if mode != ProxyModeUDP {
+		return errors.New("tunnel requires -mode udp")
 	}
 	if strings.TrimSpace(t.Config) == "" {
 		return errors.New("tunnel config is required")
@@ -74,6 +105,12 @@ func ValidateServer(s *Server) error {
 		return errors.New("server address is required")
 	}
 	if err := validateObfProfile(s.Obf.Profile); err != nil {
+		return err
+	}
+	if err := validateProxyMode(s.Proxy.Mode); err != nil {
+		return err
+	}
+	if err := validateKCPFor(s.KCP, s.Proxy.Mode); err != nil {
 		return err
 	}
 	return validateObfTiming(s.Obf)

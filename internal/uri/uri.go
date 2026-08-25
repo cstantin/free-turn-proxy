@@ -17,6 +17,7 @@ type Config struct {
 	Provider       string
 	Peer           string
 	Transport      string
+	Mode           string
 	ObfProfile     string
 	ObfKey         string
 	N              int
@@ -26,6 +27,7 @@ type Config struct {
 	DNSMode        string
 	DNSServers     string
 	ManualCaptcha  bool
+	KCP            *KCP
 	Comment        string
 }
 
@@ -35,6 +37,7 @@ type wire struct {
 	Provider       string `json:"provider"`
 	Peer           string `json:"peer"`
 	Transport      string `json:"transport,omitempty"`
+	Mode           string `json:"mode,omitempty"`
 	Obf            string `json:"obf,omitempty"`
 	Key            string `json:"key,omitempty"`
 	N              int    `json:"n,omitempty"`
@@ -44,6 +47,7 @@ type wire struct {
 	DNSMode        string `json:"dns,omitempty"`
 	DNSServers     string `json:"dnss,omitempty"`
 	ManualCaptcha  bool   `json:"mcap,omitempty"`
+	KCP            *KCP   `json:"kcp,omitempty"`
 	Name           string `json:"name,omitempty"`
 }
 
@@ -81,6 +85,7 @@ func Parse(s string) (*Config, error) {
 		Provider:       w.Provider,
 		Peer:           w.Peer,
 		Transport:      w.Transport,
+		Mode:           w.Mode,
 		ObfProfile:     w.Obf,
 		ObfKey:         w.Key,
 		N:              w.N,
@@ -90,6 +95,7 @@ func Parse(s string) (*Config, error) {
 		DNSMode:        w.DNSMode,
 		DNSServers:     w.DNSServers,
 		ManualCaptcha:  w.ManualCaptcha,
+		KCP:            w.KCP,
 		Comment:        w.Name,
 	}, nil
 }
@@ -101,6 +107,7 @@ func (c *Config) String() string {
 		Provider:       c.Provider,
 		Peer:           c.Peer,
 		Transport:      c.Transport,
+		Mode:           c.Mode,
 		N:              c.N,
 		StreamsPerCred: c.StreamsPerCred,
 		ClientID:       c.ClientID,
@@ -108,6 +115,7 @@ func (c *Config) String() string {
 		DNSMode:        c.DNSMode,
 		DNSServers:     c.DNSServers,
 		ManualCaptcha:  c.ManualCaptcha,
+		KCP:            c.KCP,
 		Name:           c.Comment,
 	}
 	if c.ObfProfile != "" && c.ObfProfile != "none" {
@@ -120,4 +128,15 @@ func (c *Config) String() string {
 		return ""
 	}
 	return scheme + base64.RawURLEncoding.EncodeToString(raw)
+}
+
+type KCP struct {
+	NoDelay    int  `json:"nodelay"`
+	Interval   int  `json:"interval"`
+	Resend     int  `json:"resend"`
+	NC         int  `json:"nc"`
+	SndWnd     int  `json:"sndwnd"`
+	RcvWnd     int  `json:"rcvwnd"`
+	MTU        int  `json:"mtu"`
+	ACKNoDelay bool `json:"acknodelay"`
 }

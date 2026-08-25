@@ -17,12 +17,14 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk/internal/browserprofile"
 )
 
+const powResultGlobal = "captchaPowResult"
+
 // PoW-скрипт страницы обфусцирован, имена переменных генерируются заново на каждый
 // релиз. Стабильны только аргументы IIFE (input, difficulty, метка ошибки) и
 // префикс версии конверта.
 var (
 	rePowArgs   = regexp.MustCompile(`\}\(\s*["']([A-Za-z0-9_-]{8,})["']\s*,\s*(\d+)\s*,\s*["'][^"']*["']\s*\)\s*\)`)
-	rePowPrefix = regexp.MustCompile(`captchaPowResult["'\]]{0,3}\s*=\s*["']([A-Za-z0-9._-]{0,8})["']\s*\+`)
+	rePowPrefix = regexp.MustCompile(powResultGlobal + `["'\]]{0,3}\s*=\s*["']([A-Za-z0-9._-]{0,8})["']\s*\+`)
 )
 
 type powParams struct {

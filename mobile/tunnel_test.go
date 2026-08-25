@@ -220,3 +220,11 @@ func TestClampToInt64Overflow(t *testing.T) {
 		t.Errorf("clampToInt64(MaxInt64) = %d, want MaxInt64", got)
 	}
 }
+
+// В tcp-режиме ядро tun не читает: принятый fd остался бы установленным вхолостую.
+func TestStartTunnelRejectsTCPMode(t *testing.T) {
+	const cfg = `{"peer":"1.2.3.4:5000","clientId":"deadbeef","proxy":{"mode":"tcp"},"vk":{"links":["https://vk.ru/call/join/CODE"]}}`
+	if err := StartTunnel(cfg, 7); !errors.Is(err, ErrTCPModeRequiresStart) {
+		t.Fatalf("StartTunnel() error = %v, want ErrTCPModeRequiresStart", err)
+	}
+}

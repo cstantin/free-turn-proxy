@@ -39,13 +39,14 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	}
 	fs.StringVar(&r.Turn, "turn", r.Turn, "IP TURN-сервера; override creds провайдера")
 	fs.StringVar(&r.Port, "port", r.Port, "порт TURN-сервера; override creds провайдера")
-	fs.StringVar(&r.Listen, "listen", r.Listen, "локальный ip:port для WireGuard-клиента")
+	fs.StringVar(&r.Listen, "listen", r.Listen, "локальный ip:port для WireGuard/Xray клиента")
 	fs.StringVar(&r.Provider, "provider", r.Provider, "источник TURN-creds: vk")
 	fs.StringVar(&r.Link, "link", r.Link, "(устарел) одна ссылка VK Calls, используйте -links")
 	fs.StringVar(&r.Links, "links", r.Links, "ссылки VK Calls через запятую: https://vk.ru/call/join/...,https://vk.ru/call/join/...")
 	fs.StringVar(&r.Peer, "peer", r.Peer, "адрес сервера на VPS, host:port; обязательно")
 	fs.IntVar(&r.N, "n", r.N, "число параллельных TURN-потоков")
 	fs.StringVar(&r.Transport, "transport", r.Transport, "транспорт до TURN-реле: tcp | udp")
+	fs.StringVar(&r.Mode, "mode", r.Mode, "режим туннеля: udp (WireGuard) | tcp (Xray/sing-box)")
 	fs.StringVar(&r.ObfProfile, "obf-profile", r.ObfProfile, "wire-профиль обфускации: none | rtpopus | rtpopus2 | rtpopus3; должен совпадать с сервером")
 	fs.StringVar(&r.ObfKey, "obf-key", r.ObfKey, "ключ для -obf-profile != none: 32 байта hex (64 символа)")
 	fs.BoolVar(&r.GenObfKey, "gen-obf-key", r.GenObfKey, "напечатать новый -obf-key и выйти")
@@ -59,6 +60,7 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 	fs.StringVar(&r.ClientID, "client-id", r.ClientID, "уникальный ID клиента (автогенерация если не задан)")
 	fs.StringVar(&r.SubURL, "sub", r.SubURL, "URL подписки (sub.md) для получения списка серверов")
 	fs.BoolVar(&r.Routes, "routes", r.Routes, "автоматическое управление маршрутами к TURN-серверам; требует прав администратора")
+	kcp := registerKCPFlags(fs, r.KCP)
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -71,6 +73,7 @@ func ParseClient(args []string, errOut io.Writer) (*Client, error) {
 		}
 		r.applyURI(u)
 	}
+	r.KCP = kcp.profile()
 
 	c, err := assemble(r)
 	if err != nil {
@@ -94,16 +97,24 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 		fs.SetOutput(errOut)
 	}
 	listen := fs.String("listen", def.Proxy.Listen, "локальный адрес прослушивания ip:port")
-	connect := fs.String("connect", "", "локальный бэкенд host:port; обязательно: WG 127.0.0.1:51820")
+	connect := fs.String("connect", "", "локальный бэкенд host:port; обязательно: WG 127.0.0.1:51820 | Xray 127.0.0.1:443")
+	mode := fs.String("mode", string(def.Proxy.Mode), "режим туннеля: udp (WireGuard) | tcp (Xray/sing-box)")
 	obfProfile := fs.String("obf-profile", string(def.Obf.Profile), "wire-профиль обфускации: none | rtpopus | rtpopus2 | rtpopus3; должен совпадать с клиентом")
 	obfKey := fs.String("obf-key", "", "ключ для -obf-profile != none: 32 байта hex (64 символа)")
 	genObfKey := fs.Bool("gen-obf-key", false, "напечатать новый -obf-key и выйти")
 	obfTiming := fs.Duration("obf-timing", 0, "межпакетная задержка для RTP-мимикрии (напр. 10ms); 0=выкл")
 	debug := fs.Bool("debug", false, "подробные debug-логи")
 	clientsFile := fs.String("clients-file", "", "путь к файлу clients.json для авторизации по Client ID")
+	kcp := registerKCPFlags(fs, def.KCP.Profile)
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
+	}
+
+	switch *mode {
+	case ModeUDP, ModeTCP:
+	default:
+		return nil, fmt.Errorf("invalid -mode value %q: must be %s | %s", *mode, ModeUDP, ModeTCP)
 	}
 
 	s := &Server{
@@ -113,10 +124,12 @@ func ParseServer(args []string, errOut io.Writer) (*Server, error) {
 			Timing:  *obfTiming,
 		},
 		Proxy: ProxyOpts{
+			Mode:    ProxyMode(*mode),
 			Listen:  *listen,
 			Connect: *connect,
 		},
 		Log:         LogOpts{Debug: *debug},
+		KCP:         KCPOpts{Profile: kcp.profile()},
 		ClientsFile: *clientsFile,
 	}
 

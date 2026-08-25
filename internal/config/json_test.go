@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcpmux"
 	"github.com/samosvalishe/free-turn-proxy/internal/uri"
 )
 
@@ -152,5 +153,31 @@ func TestClientJSONTimingMsMapsToDuration(t *testing.T) {
 	}
 	if c.Obf.Timing != 25*time.Millisecond {
 		t.Errorf("Obf.Timing = %v, want 25ms", c.Obf.Timing)
+	}
+}
+
+// Старый JSON без секций mode/kcp обязан читаться: поля optional, дефолт - udp.
+func TestParseClientJSONLegacyWithoutMode(t *testing.T) {
+	data := `{"peer":"1.2.3.4:5000","vk":{"links":["abcdef"]}}`
+	c, err := ParseClientJSON([]byte(data), "")
+	if err != nil {
+		t.Fatalf("ParseClientJSON() error = %v", err)
+	}
+	if c.Proxy.Mode != ProxyModeUDP {
+		t.Errorf("Proxy.Mode = %q, want udp", c.Proxy.Mode)
+	}
+	if c.KCP.Profile != kcpmux.DefaultProfile() {
+		t.Errorf("KCP profile = %+v, want default", c.KCP.Profile)
+	}
+}
+
+func TestParseClientJSONTCPMode(t *testing.T) {
+	data := `{"peer":"1.2.3.4:5000","vk":{"links":["abcdef"]},"proxy":{"mode":"tcp"}}`
+	c, err := ParseClientJSON([]byte(data), "")
+	if err != nil {
+		t.Fatalf("ParseClientJSON() error = %v", err)
+	}
+	if c.Proxy.Mode != ProxyModeTCP {
+		t.Errorf("Proxy.Mode = %q, want tcp", c.Proxy.Mode)
 	}
 }

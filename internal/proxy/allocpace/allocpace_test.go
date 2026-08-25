@@ -1,4 +1,4 @@
-package udprelay
+package allocpace
 
 import (
 	"context"
@@ -15,14 +15,14 @@ func TestAllocPacerSpacesConcurrentWaiters(t *testing.T) {
 		waiters  = 5
 		slowdown = 3
 	)
-	p := newAllocPacer(step)
+	p := New(step)
 
 	start := time.Now()
 	var wg sync.WaitGroup
 	elapsed := make([]time.Duration, waiters)
 	for i := range waiters {
 		wg.Go(func() {
-			if !p.wait(context.Background()) {
+			if !p.Wait(context.Background()) {
 				t.Errorf("waiter %d: wait returned false", i)
 				return
 			}
@@ -46,10 +46,10 @@ func TestAllocPacerSpacesConcurrentWaiters(t *testing.T) {
 // Первый в очереди не платит ничего: рецикл одинокого стрима не должен ждать шаг.
 func TestAllocPacerFirstSlotIsFree(t *testing.T) {
 	t.Parallel()
-	p := newAllocPacer(time.Second)
+	p := New(time.Second)
 
 	start := time.Now()
-	if !p.wait(context.Background()) {
+	if !p.Wait(context.Background()) {
 		t.Fatal("wait returned false")
 	}
 	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
@@ -59,7 +59,7 @@ func TestAllocPacerFirstSlotIsFree(t *testing.T) {
 
 func TestAllocPacerWaitReturnsFalseOnCancel(t *testing.T) {
 	t.Parallel()
-	p := newAllocPacer(time.Hour)
+	p := New(time.Hour)
 	p.slot() // занять первый слот, следующий уедет на час
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -67,7 +67,7 @@ func TestAllocPacerWaitReturnsFalseOnCancel(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 		cancel()
 	}()
-	if p.wait(ctx) {
+	if p.Wait(ctx) {
 		t.Fatal("wait returned true on cancelled context")
 	}
 }
@@ -75,13 +75,13 @@ func TestAllocPacerWaitReturnsFalseOnCancel(t *testing.T) {
 // Nil-приёмник допустим: Deps собирают и в обход Run.
 func TestAllocPacerNilIsPassthrough(t *testing.T) {
 	t.Parallel()
-	var p *allocPacer
-	if !p.wait(context.Background()) {
+	var p *Pacer
+	if !p.Wait(context.Background()) {
 		t.Fatal("nil pacer must pass through")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if p.wait(ctx) {
+	if p.Wait(ctx) {
 		t.Fatal("nil pacer must respect cancelled context")
 	}
 }

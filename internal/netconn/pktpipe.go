@@ -158,3 +158,24 @@ func (p *packetPipe) SetReadDeadline(t time.Time) error {
 
 // SetWriteDeadline - no-op: неблокирующая запись дропает пакет при переполнении очереди.
 func (*packetPipe) SetWriteDeadline(time.Time) error { return nil }
+
+// datagramConn подаёт packetPipe как net.Conn: границы датаграмм сохраняются, поэтому
+// поверх такой пары можно поднимать KCP без реального сокета.
+type datagramConn struct {
+	net.PacketConn
+	remote net.Addr
+}
+
+func (c *datagramConn) Read(b []byte) (int, error) {
+	n, _, err := c.ReadFrom(b)
+	return n, err
+}
+
+func (c *datagramConn) Write(b []byte) (int, error) { return c.WriteTo(b, c.remote) }
+func (c *datagramConn) RemoteAddr() net.Addr        { return c.remote }
+
+// DatagramPipe - пара связанных net.Conn в памяти с датаграммной семантикой.
+func DatagramPipe(mtu, queue int) (net.Conn, net.Conn) {
+	a, b := PacketPipe(mtu, queue)
+	return &datagramConn{PacketConn: a, remote: b.LocalAddr()}, &datagramConn{PacketConn: b, remote: a.LocalAddr()}
+}

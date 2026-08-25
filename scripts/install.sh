@@ -25,7 +25,7 @@ readonly COMPOSE_FILE="${APP_DIR}/docker-compose.yml"
 readonly CONTAINER="free-turn-proxy"
 readonly GUM_VERSION="0.17.0"   # pinned; при сбое скачивания — fallback на latest API
 
-# WireGuard bootstrap (опциональный)
+# WireGuard bootstrap (опциональный, только mode=udp)
 readonly WG_DIR="/etc/wireguard"
 readonly WG_IFACE="wg0"
 readonly WG_CONF="${WG_DIR}/${WG_IFACE}.conf"
@@ -52,6 +52,7 @@ readonly C_RED='\033[0;31m' C_GREEN='\033[0;32m' C_YELLOW='\033[1;33m' C_CYAN='\
 INSTALL_METHOD="docker"  # docker | systemd
 VERSION="latest"
 PROVIDER="vk"            # vk (источник TURN-creds на клиенте; сервер provider-agnostic)
+PROXY_MODE="udp"         # udp | tcp
 BACKEND_PORT=""
 LISTEN_PORT="56000"
 OBF_PROFILE="rtpopus"    # rtpopus | none
@@ -333,6 +334,7 @@ save_config() {
 INSTALL_METHOD="$INSTALL_METHOD"
 VERSION="$VERSION"
 PROVIDER="$PROVIDER"
+PROXY_MODE="$PROXY_MODE"
 BACKEND_PORT="$BACKEND_PORT"
 LISTEN_PORT="$LISTEN_PORT"
 OBF_PROFILE="$OBF_PROFILE"
@@ -356,8 +358,9 @@ connect_addr() { echo "127.0.0.1:${BACKEND_PORT}"; }
 validate_config() {
     case "$INSTALL_METHOD" in docker | systemd) ;; *) die "method: docker|systemd, а не '$INSTALL_METHOD'" ;; esac
     case "$PROVIDER"       in vk) ;; *) die "provider: vk, а не '$PROVIDER'" ;; esac
+    case "$PROXY_MODE"     in udp | tcp) ;; *) die "mode: udp|tcp, а не '$PROXY_MODE'" ;; esac
     valid_port "$LISTEN_PORT" || die "listen-port невалиден: '$LISTEN_PORT'"
-    [ -z "$BACKEND_PORT" ] && BACKEND_PORT="51820"
+    [ -z "$BACKEND_PORT" ] && { [ "$PROXY_MODE" = "udp" ] && BACKEND_PORT="51820" || BACKEND_PORT="443"; }
     valid_port "$BACKEND_PORT" || die "backend-port невалиден: '$BACKEND_PORT'"
     case "$OBF_PROFILE" in
         rtpopus)
@@ -367,6 +370,7 @@ validate_config() {
         *) die "obf: rtpopus|none, а не '$OBF_PROFILE'" ;;
     esac
     if [ "$WG_SETUP" = "1" ]; then
+        [ "$PROXY_MODE" = "udp" ] || die "WireGuard bootstrap доступен только при -mode udp."
         valid_endpoint "$WG_ENDPOINT" || die "wg-endpoint невалиден (host:port): '$WG_ENDPOINT'"
     fi
     return 0
@@ -381,6 +385,12 @@ wizard_method() {
         systemd "Systemd  (бинарь напрямую)"
 }
 
+wizard_mode() {
+    ui_menu PROXY_MODE "Режим туннеля:" "$PROXY_MODE" \
+        udp "UDP-relay  ·  WireGuard / AmneziaWG" \
+        tcp "TCP-forward  ·  Xray / sing-box"
+}
+
 wizard_provider() {
     ui_menu PROVIDER "Провайдер TURN-creds (клиент):" "$PROVIDER" \
         vk "VK Calls API"
@@ -388,19 +398,23 @@ wizard_provider() {
 
 wizard_ports() {
     detect_wg_port
-    local def_backend="$BACKEND_PORT"
+    local def_backend="$BACKEND_PORT" label="Порт вашего VPN / бэкенда"
     if [ -z "$def_backend" ]; then
-        if [ -n "$WG_PORT" ]; then
+        if [ "$PROXY_MODE" = "udp" ] && [ -n "$WG_PORT" ]; then
             def_backend="$WG_PORT"; log_info "Найден WireGuard на порту $WG_PORT."
-        else
-            def_backend="51820"
-        fi
+        elif [ "$PROXY_MODE" = "udp" ]; then def_backend="51820"
+        else def_backend="443"; fi
     fi
-    ask_port BACKEND_PORT "Порт вашего VPN / бэкенда" "$def_backend"
+    if [ "$PROXY_MODE" = "tcp" ]; then
+        label="Порт TCP-бэкенда (Xray / sing-box inbound)"
+        ui_note "TCP-режим" "Backend — ваш Xray/sing-box inbound на 127.0.0.1. Сервис поднимаете отдельно; инсталлятор его не ставит."
+    fi
+    ask_port BACKEND_PORT "$label" "$def_backend"
     ask_port LISTEN_PORT  "Внешний порт (приём Free Turn Proxy)" "${LISTEN_PORT:-56000}"
 }
 
 wizard_wireguard() {
+    [ "$PROXY_MODE" = "udp" ] || { WG_SETUP=0; return; }
     if [ -n "$WG_PORT" ]; then
         log_info "Обнаружен WireGuard (порт $WG_PORT) — использую существующий."
         WG_SETUP=0; return
@@ -489,6 +503,7 @@ review_config() {
 | Метод          | $INSTALL_METHOD |
 | Версия         | $VERSION |
 | Провайдер      | $PROVIDER |
+| Режим          | $PROXY_MODE |
 | Порт бэкенда   | 127.0.0.1:$BACKEND_PORT |
 | Внешний порт   | 0.0.0.0:$LISTEN_PORT |
 | Обфускация     | $obf_line |
@@ -496,13 +511,14 @@ review_config() {
 | WireGuard      | $wg_line |
 EOF
     else
-        echo; log_info "Настройки: method=$INSTALL_METHOD version=$VERSION provider=$PROVIDER backend=$BACKEND_PORT listen=$LISTEN_PORT obf=$obf_line auth=$auth_line wireguard=$wg_line"
+        echo; log_info "Настройки: method=$INSTALL_METHOD version=$VERSION provider=$PROVIDER mode=$PROXY_MODE backend=$BACKEND_PORT listen=$LISTEN_PORT obf=$obf_line auth=$auth_line wireguard=$wg_line"
     fi
     ui_yesno "Применить эти настройки?" "Y" || ui_abort
 }
 
 wizard() {
     wizard_method
+    wizard_mode
     wizard_provider
     wizard_ports
     wizard_wireguard
@@ -669,6 +685,7 @@ apply_docker() {
         echo "    environment:"
         echo "      - CONNECT_ADDR=$(connect_addr)"
         echo "      - LISTEN_ADDR=0.0.0.0:${LISTEN_PORT}"
+        echo "      - MODE=${PROXY_MODE}"
         echo "      - OBF_PROFILE=${OBF_PROFILE}"
         [ "$OBF_PROFILE" != "none" ] && echo "      - OBF_KEY=${OBF_KEY}"
         if [ -n "$CLIENTS_FILE_CONF" ]; then
@@ -705,7 +722,7 @@ healthcheck_systemd() {
 
 apply_systemd() {
     download_binary
-    local args; args="-listen 0.0.0.0:${LISTEN_PORT} -connect $(connect_addr)"
+    local args; args="-listen 0.0.0.0:${LISTEN_PORT} -connect $(connect_addr) -mode ${PROXY_MODE}"
     [ "$OBF_PROFILE" != "none" ] && args="$args -obf-profile ${OBF_PROFILE} -obf-key ${OBF_KEY}"
     [ -n "$CLIENTS_FILE_CONF" ] && args="$args -clients-file ${CLIENTS_FILE_CONF}"
     cat > "$UNIT_FILE" <<EOF
@@ -757,6 +774,7 @@ print_summary() {
             echo "|---|---|"
             echo "| **Сервер (peer)** | \`${ext_ip}:${LISTEN_PORT}\` |"
             echo "| **Провайдер** | ${PROVIDER} (клиент: \`-provider ${PROVIDER}\`) |"
+            echo "| **Режим** | ${PROXY_MODE} |"
             echo "| **Версия** | ${VERSION} |"
             echo "| **Метод** | ${INSTALL_METHOD} |"
             [ "$OBF_PROFILE" != "none" ] && echo "| **Обфускация** | ${OBF_PROFILE} |"
@@ -783,7 +801,7 @@ print_summary() {
         echo "--------------------------------------------------------"
         echo "Сервер (peer): ${ext_ip}:${LISTEN_PORT}"
         echo "Провайдер (клиент): -provider ${PROVIDER}"
-        echo "Версия: ${VERSION} | Метод: ${INSTALL_METHOD}"
+        echo "Режим: ${PROXY_MODE} | Версия: ${VERSION} | Метод: ${INSTALL_METHOD}"
         [ "$OBF_PROFILE" != "none" ] && echo "Обфускация: ${OBF_PROFILE} | Ключ: ${OBF_KEY}"
         [ -n "$CLIENTS_FILE_CONF" ] && { echo "Client ID auth включён. Добавить клиента:"; echo "  $add_cmd"; }
         [ "$WG_SETUP" = "1" ] && echo "WireGuard поднят. Клиентский конфиг: $WG_CLIENT_CONF (Endpoint $WG_ENDPOINT, готов)."
@@ -868,7 +886,8 @@ Free Turn Proxy — установщик сервера.
   -y, --yes, --non-interactive   без вопросов
   --method docker|systemd        метод (default docker)
   --provider vk                  провайдер TURN-creds для клиента (default vk)
-  --backend-port N               порт бэкенда (default 51820)
+  --mode   udp|tcp               режим (default udp)
+  --backend-port N               порт бэкенда (default udp→51820 / tcp→443)
   --listen-port N                внешний порт (default 56000)
   --obf rtpopus|none             обфускация (default rtpopus)
   --obf-key HEX64                ключ (нет → сгенерируется)
@@ -882,7 +901,7 @@ Free Turn Proxy — установщик сервера.
   -h, --help
 
 Примеры:
-  sudo bash install.sh -y --method docker --backend-port 51820
+  sudo bash install.sh -y --method docker --mode udp --backend-port 51820
   sudo bash install.sh -y --update --version v1.2.3
   sudo bash install.sh -y --uninstall --purge
 EOF
@@ -902,6 +921,7 @@ parse_args() {
                     vk) OVERRIDES+=("PROVIDER=${2}") ;;
                     *) die "--provider: vk" ;;
                 esac; shift ;;
+            --mode)            OVERRIDES+=("PROXY_MODE=${2:-}"); shift ;;
             --backend-port)    OVERRIDES+=("BACKEND_PORT=${2:-}"); shift ;;
             --listen-port)     OVERRIDES+=("LISTEN_PORT=${2:-}"); shift ;;
             --obf)             OVERRIDES+=("OBF_PROFILE=${2:-}"); shift ;;

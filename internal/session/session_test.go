@@ -325,3 +325,35 @@ func TestRelayLoopTurnsPanicIntoError(t *testing.T) {
 		t.Fatal("relayLoop() hung on panic")
 	}
 }
+
+// В tcp-режиме рецикл идёт в пул, а не в отмену попытки: отмена закрыла бы listener.
+func TestReconnectRoutesByMode(t *testing.T) {
+	t.Parallel()
+
+	tcp, err := New(&config.Client{Proxy: config.ProxyOpts{Mode: config.ProxyModeTCP}}, Deps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcp.Reconnect()
+	select {
+	case <-tcp.recycleCh:
+	default:
+		t.Error("tcp mode: recycleCh empty")
+	}
+	select {
+	case <-tcp.reconnectCh:
+		t.Error("tcp mode: reconnectCh must stay empty")
+	default:
+	}
+
+	udp, err := New(&config.Client{Proxy: config.ProxyOpts{Mode: config.ProxyModeUDP}}, Deps{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	udp.Reconnect()
+	select {
+	case <-udp.reconnectCh:
+	default:
+		t.Error("udp mode: reconnectCh empty")
+	}
+}

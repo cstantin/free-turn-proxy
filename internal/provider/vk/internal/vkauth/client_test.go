@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tlsclient "github.com/bogdanfinn/tls-client"
+	"github.com/pion/stun/v3"
 )
 
 // newTestClient builds a Client with a zero-interval throttle and the supplied
@@ -36,7 +37,6 @@ func TestIsAuthError(t *testing.T) {
 		"stale nonce":                          true,
 		"invalid credential":                   true,
 		"authentication required":              true,
-		"486: Allocation Quota Reached":        true,
 		"connection refused":                   false,
 		"dial tcp 10.0.0.1:48612: i/o timeout": false,
 		"":                                     false,
@@ -49,6 +49,28 @@ func TestIsAuthError(t *testing.T) {
 	}
 	if IsAuthError(nil) {
 		t.Error("IsAuthError(nil) = true; want false")
+	}
+}
+
+func TestIsAuthErrorTurnCode(t *testing.T) {
+	t.Parallel()
+
+	codes := map[stun.ErrorCode]bool{
+		stun.CodeAllocQuotaReached:    true,
+		stun.CodeUnauthorized:         true,
+		stun.CodeStaleNonce:           true,
+		stun.CodeWrongCredentials:     true,
+		stun.CodeInsufficientCapacity: false,
+		stun.CodeForbidden:            false,
+	}
+	for code, want := range codes {
+		err := fmt.Errorf("TURN allocate: %w", &stun.TurnError{
+			StunMessageType: stun.NewType(stun.MethodAllocate, stun.ClassErrorResponse),
+			ErrorCodeAttr:   stun.ErrorCodeAttribute{Code: code, Reason: []byte("reason")},
+		})
+		if got := IsAuthError(err); got != want {
+			t.Errorf("IsAuthError(code %d) = %v, want %v", code, got, want)
+		}
 	}
 }
 

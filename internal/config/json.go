@@ -24,6 +24,7 @@ type ClientJSON struct {
 	Obf    obfJSON    `json:"obf"`
 	DNS    dnsJSON    `json:"dns"`
 	Log    logJSON    `json:"log"`
+	KCP    kcpJSON    `json:"kcp"`
 	Tunnel tunnelJSON `json:"tunnel"`
 }
 
@@ -42,6 +43,7 @@ type turnJSON struct {
 }
 
 type proxyJSON struct {
+	Mode   string `json:"mode"`
 	Listen string `json:"listen"`
 }
 
@@ -129,7 +131,8 @@ func defaultClientJSON() ClientJSON {
 			Host:      r.Turn,
 			Port:      r.Port,
 		},
-		Proxy: proxyJSON{Listen: r.Listen},
+		Proxy: proxyJSON{Mode: r.Mode, Listen: r.Listen},
+		KCP:   kcpJSONFrom(r.KCP),
 		VK: vkJSON{
 			StreamsPerCred: r.StreamsPerCred,
 			ManualCaptcha:  r.ManualCaptcha,
@@ -163,6 +166,7 @@ func (j ClientJSON) toRaw() raw {
 		N:              j.TURN.N,
 		StreamsPerCred: j.VK.StreamsPerCred,
 		Transport:      j.TURN.Transport,
+		Mode:           j.Proxy.Mode,
 
 		ObfProfile: j.Obf.Profile,
 		ObfKey:     j.Obf.Key,
@@ -182,5 +186,7 @@ func (j ClientJSON) toRaw() raw {
 		TunnelMode:   j.Tunnel.Mode,
 		TunnelConfig: j.Tunnel.Config,
 		TunnelMTU:    j.Tunnel.MTU,
+
+		KCP: j.KCP.profile(),
 	}
 }

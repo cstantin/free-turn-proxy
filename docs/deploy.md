@@ -16,9 +16,9 @@ curl -fsSL https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/master
 
 **Неинтерактивный режим** (для автоматизации):
 ```bash
-# Установка через Docker (порт бэкенда 51820)
+# Установка через Docker (UDP, порт бэкенда 51820)
 curl -fsSL https://raw.githubusercontent.com/samosvalishe/free-turn-proxy/master/scripts/install.sh | \
-  sudo bash -s -- -y --method docker --backend-port 51820
+  sudo bash -s -- -y --method docker --mode udp --backend-port 51820
 
 # Обновление до конкретной версии
 sudo bash install.sh -y --update --version v1.2.3
@@ -59,8 +59,9 @@ openssl rand -hex 32
        network_mode: "host" # Важно для доступа к локальному VPN (127.0.0.1)
        restart: unless-stopped
        environment:
-         - CONNECT_ADDR=127.0.0.1:51820  # Порт ВАШЕГО VPN (WG/AmneziaWG)
+         - CONNECT_ADDR=127.0.0.1:51820  # Порт ВАШЕГО VPN (WG/AmneziaWG/Xray)
          - LISTEN_ADDR=0.0.0.0:56000     # Внешний порт
+         - MODE=udp                      # udp (WG/Amnezia) или tcp (Xray/VLESS)
          - OBF_PROFILE=rtpopus           # Обязательная маскировка
          - OBF_KEY=<ВАШ_КЛЮЧ>            # Ваш ключ
          # - CLIENTS_FILE=/opt/free-turn-proxy/clients.json # Для авторизации
@@ -102,7 +103,7 @@ openssl rand -hex 32
 
 ## Настройка Файрвола
 
-Откройте внешний порт (сервер слушает по **UDP**):
+Откройте внешний порт (сервер слушает по **UDP**, даже если `MODE=tcp`):
 ```bash
 sudo ufw allow 56000/udp
 # Или iptables: sudo iptables -I INPUT -p udp --dport 56000 -j ACCEPT
@@ -128,6 +129,8 @@ sudo ufw allow 56000/udp
 | --- | --- | --- |
 | `CONNECT_ADDR` | **обязательна** | IP и порт вашего VPN (бэкенда) |
 | `LISTEN_ADDR` | `0.0.0.0:56000` | Внешний адрес прослушивания |
+| `MODE` | `udp` | Режим туннеля: `udp` \| `tcp`; должен совпадать с клиентом |
+| `KCP_*` | из дефолта | Тюнинг ARQ при `MODE=tcp`: `KCP_NODELAY`, `KCP_INTERVAL`, `KCP_RESEND`, `KCP_NC`, `KCP_SNDWND`, `KCP_RCVWND`, `KCP_MTU`, `KCP_ACKNODELAY` |
 | `OBF_PROFILE` | `none` | Маскировка: `none` \| `rtpopus` \| `rtpopus2` |
 | `OBF_KEY` | пусто | Ключ маскировки |
 | `CLIENTS_FILE`| пусто | Путь к JSON-файлу авторизации |

@@ -40,6 +40,10 @@ const (
 
 var ErrTunnelRequiresStartTunnel = errors.New("tunnel mode requires StartTunnel with a platform tun fd")
 
+// ErrTCPModeRequiresStart - в tcp-режиме ядро слушает локальный порт и tun не читает:
+// принятый fd остался бы установленным вхолостую, а трафик устройства - в чёрной дыре.
+var ErrTCPModeRequiresStart = errors.New("proxy mode tcp requires Start without a tun fd")
+
 var version = "dev"
 
 func Version() string { return version }
@@ -242,6 +246,9 @@ func startLocked(configJSON string, tunFD int, withTunnel bool) error {
 	}
 	if cfg.Tunnel.Enabled() && !withTunnel {
 		return fmt.Errorf("%w (mode=%s)", ErrTunnelRequiresStartTunnel, cfg.Tunnel.Mode)
+	}
+	if withTunnel && cfg.Proxy.Mode == config.ProxyModeTCP {
+		return ErrTCPModeRequiresStart
 	}
 
 	logger := &sinkLogger{debug: cfg.Log.Debug, buf: sharedLogBuf}

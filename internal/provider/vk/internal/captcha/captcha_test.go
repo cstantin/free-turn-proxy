@@ -278,3 +278,18 @@ func TestParseCaptchaPageRejectsNonCaptchaHTML(t *testing.T) {
 		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}
 }
+
+// Смена обфускации - не аутаж: ошибка обязана дойти до эскалации на другой решатель.
+// Переименованный конверт PoW - именно этот случай, страница настоящая.
+func TestParseCaptchaPageBrokenParserIsNotUnavailable(t *testing.T) {
+	t.Parallel()
+	for name, html := range map[string]string{
+		"pow renamed":  `<script>window.vk = {}; window.zzz = "v2." + solve();</script>`,
+		"debug absent": `<script>window.init = {};</script>`,
+	} {
+		_, err := parseCaptchaPage(html)
+		if err == nil || errors.Is(err, ErrUnavailable) {
+			t.Fatalf("%s: err = %v, want plain parse error", name, err)
+		}
+	}
+}

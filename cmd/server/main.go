@@ -17,6 +17,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/clientsdb"
 	"github.com/samosvalishe/free-turn-proxy/internal/config"
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/proxy/tcpserver"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/udpserver"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire"
@@ -129,6 +130,7 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
+	var backoff time.Duration
 	for {
 		select {
 		case <-ctx.Done():
@@ -142,13 +144,51 @@ func main() {
 				wg.Wait()
 				return
 			}
-			logger.Warnf("accept: %v", err)
+			// Отказ обычно устойчив (EMFILE): без паузы цикл сжёг бы ядро на ретраях.
+			backoff = nextAcceptBackoff(backoff)
+			logger.Warnf("accept: %v, retry in %s", err, backoff)
+			select {
+			case <-ctx.Done():
+				wg.Wait()
+				return
+			case <-time.After(backoff):
+			}
 			continue
 		}
+		backoff = 0
 		wg.Go(func() {
 			handleAccepted(ctx, logger, db, conn, cfg)
 		})
 	}
+}
+
+const (
+	minAcceptBackoff = 5 * time.Millisecond
+	maxAcceptBackoff = time.Second
+)
+
+func nextAcceptBackoff(d time.Duration) time.Duration {
+	if d <= 0 {
+		return minAcceptBackoff
+	}
+	if d *= 2; d > maxAcceptBackoff {
+		return maxAcceptBackoff
+	}
+	return d
+}
+
+func wireMode(m config.ProxyMode) byte {
+	if m == config.ProxyModeTCP {
+		return clientsdb.ModeTCP
+	}
+	return clientsdb.ModeUDP
+}
+
+func modeName(b byte) string {
+	if b == clientsdb.ModeTCP {
+		return string(config.ProxyModeTCP)
+	}
+	return string(config.ProxyModeUDP)
 }
 
 func handleAccepted(ctx context.Context, logger logx.Logger, db *clientsdb.DB, conn net.Conn, cfg *config.Server) {
@@ -177,9 +217,18 @@ func handleAccepted(ctx context.Context, logger logx.Logger, db *clientsdb.DB, c
 	logger.Debugf("Handshake done")
 
 	// Wire-контракт: клиент всегда передаёт Client ID первой app-record.
-	clientID, err := clientsdb.ReadClientID(dtlsConn)
+	clientID, clientMode, err := clientsdb.ReadClientID(dtlsConn)
 	if err != nil {
 		logger.Warnf("Read Client ID failed: %v", err)
+		return
+	}
+	if want := wireMode(cfg.Proxy.Mode); clientMode != clientsdb.ModeUnset && clientMode != want {
+		logger.Warnf("Mode mismatch from %s: клиент %s, сервер %s - трафик не пойдёт, приведите -mode к одному значению",
+			conn.RemoteAddr(), modeName(clientMode), cfg.Proxy.Mode)
+		return
+	}
+	if clientMode == clientsdb.ModeUnset && cfg.Proxy.Mode == config.ProxyModeTCP {
+		logger.Warnf("Mode mismatch from %s: клиент без тега режима (udp), сервер tcp", conn.RemoteAddr())
 		return
 	}
 	if db != nil {
@@ -193,7 +242,11 @@ func handleAccepted(ctx context.Context, logger logx.Logger, db *clientsdb.DB, c
 	}
 
 	logger.Infof("Session up: client=%s from=%s", clientID, conn.RemoteAddr())
-	udpserver.Handle(ctx, logger, conn, cfg.Proxy.Connect)
+	if cfg.Proxy.Mode == config.ProxyModeTCP {
+		tcpserver.Handle(ctx, logger, dtlsConn, cfg.Proxy.Connect, cfg.KCP.Profile)
+	} else {
+		udpserver.Handle(ctx, logger, conn, cfg.Proxy.Connect)
+	}
 	logger.Infof("Session down: client=%s from=%s", clientID, conn.RemoteAddr())
 }
 

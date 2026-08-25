@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
+	"github.com/samosvalishe/free-turn-proxy/internal/proxy/allocpace"
 	"github.com/samosvalishe/free-turn-proxy/internal/safego"
 	"github.com/samosvalishe/free-turn-proxy/internal/stats"
 	"github.com/samosvalishe/free-turn-proxy/internal/transport/dtlsdial"
@@ -51,7 +52,7 @@ type Deps struct {
 	ConnectedStreams *atomic.Int32
 	OnTURNServer     func(ip net.IP)
 	fatalCh          chan error
-	allocPace        *allocPacer
+	allocPace        *allocpace.Pacer
 }
 
 func (d *Deps) log() logx.Logger {
@@ -92,7 +93,7 @@ func Run(ctx context.Context, dtlsDialer *dtlsdial.Dialer, auth AuthHandler, log
 		ConnectedStreams: connectedStreams,
 		OnTURNServer:     onTURNServer,
 		fatalCh:          fatalCh,
-		allocPace:        newAllocPacer(allocPaceInterval),
+		allocPace:        allocpace.New(allocpace.DefaultInterval),
 	}
 
 	runCtx, runCancel := context.WithCancel(ctx)

@@ -80,17 +80,44 @@ func TestClientIDRoundTrip(t *testing.T) {
 	expectedID := "client-test-uuid-123"
 
 	go func() {
-		if werr := WriteClientID(clientConn, expectedID); werr != nil {
+		if werr := WriteClientID(clientConn, expectedID, ModeTCP); werr != nil {
 			t.Errorf("WriteClientID failed: %v", werr)
 		}
 	}()
 
-	readID, err := ReadClientID(serverConn)
+	readID, mode, err := ReadClientID(serverConn)
 	if err != nil {
 		t.Fatalf("ReadClientID: %v", err)
 	}
 
 	if readID != expectedID {
 		t.Errorf("expected %q, got %q", expectedID, readID)
+	}
+	if mode != ModeTCP {
+		t.Errorf("mode = %d, want %d", mode, ModeTCP)
+	}
+}
+
+// Клиент старше тега режима слал ровно 1+len байт - такую запись читатель обязан принять.
+func TestReadClientIDLegacyRecordHasNoMode(t *testing.T) {
+	clientConn, serverConn := net.Pipe()
+	defer func() { _ = clientConn.Close() }()
+	defer func() { _ = serverConn.Close() }()
+
+	const id = "legacy-client"
+	go func() {
+		buf := append([]byte{byte(len(id))}, id...) //nolint:gosec // длина константы заведомо ≤255
+		_, _ = clientConn.Write(buf)
+	}()
+
+	readID, mode, err := ReadClientID(serverConn)
+	if err != nil {
+		t.Fatalf("ReadClientID: %v", err)
+	}
+	if readID != id {
+		t.Errorf("id = %q, want %q", readID, id)
+	}
+	if mode != ModeUnset {
+		t.Errorf("mode = %d, want ModeUnset", mode)
 	}
 }

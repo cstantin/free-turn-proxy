@@ -49,7 +49,7 @@ func Version() string
   "clientId": "0123456789abcdef0123456789abcdef",
   "provider": "vk",
   "turn":  {"n": 12, "transport": "tcp", "host": "", "port": ""},
-  "proxy": {"listen": "127.0.0.1:9000"},
+  "proxy": {"mode": "udp", "listen": "127.0.0.1:9000"},
   "vk":    {"links": ["https://vk.ru/call/join/..."], "streamsPerCred": 12,
             "manualCaptcha": false, "platform": "mobile"},
   "obf":   {"profile": "rtpopus3", "key": "<64 hex>", "timingMs": 0},
@@ -61,6 +61,22 @@ func Version() string
 ```
 
 *   `clientId` - обязателен. Ядро на мобиле не пишет файлы, ID должен храниться в приложении.
+
+### Режим туннеля
+
+`proxy.mode`: `udp` (по умолчанию, UDP-релей для WireGuard) или `tcp` (TCP-форвардер для Xray/sing-box).
+
+В `tcp` ядро слушает `proxy.listen` как TCP-порт, и VLESS-клиент ходит туда своим outbound. Своего tun при этом нет:
+
+*   запускать через `Start(configJSON)`, не через `StartTunnel`; `VpnService.prepare`/`establish` звать не нужно - иначе tun отбирается у чужого VPN;
+*   `protect()` не применяется, поэтому трафик до TURN пойдёт через активный системный VPN, если он включён;
+*   `TunnelStats()` не наполняется, счётчики отдаёт `GetState()`, `connected`/`total` считаются по сессиям пула так же, как в udp-режиме;
+*   `proxy.mode: "tcp"` вместе с `tunnel.mode` `wg`/`awg` отклоняется валидацией: встроенный WG гонит датаграммы;
+*   `StartTunnel` при `proxy.mode: "tcp"` возвращает `ErrTCPModeRequiresStart` - ядро tun не читает, и принятый fd остался бы установленным вхолостую.
+
+Опциональная секция `kcp` (`noDelay`, `interval`, `resend`, `nc`, `sndWnd`, `rcvWnd`, `mtu`, `ackNoDelay`) тюнит ARQ tcp-режима; в `udp` любое отличие от дефолта - ошибка. Дефолт агрессивный (`interval: 20`, окна 512, `ackNoDelay: true`), для мобильной сети щадящий вариант - `interval: 40`, окна 256, `ackNoDelay: false`.
+
+JSON парсится с `DisallowUnknownFields`, поэтому конфиг с `proxy.mode`/`kcp` требует aar с этим изменением; старый JSON без них новое ядро читает как `udp`.
 
 ### Туннелирование
 

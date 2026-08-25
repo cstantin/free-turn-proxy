@@ -62,3 +62,19 @@ func TestParse(t *testing.T) {
 		t.Errorf("Node[1].URI.Peer = %v, want 2.2.2.2:56000", n2.URI.Peer)
 	}
 }
+
+// Подписка наследует поля uri: mode должен доезжать до клиента без потерь.
+func TestParseCarriesMode(t *testing.T) {
+	link := (&uri.Config{Version: 1, Provider: "vk", Peer: "1.1.1.1:56000", Mode: "tcp"}).String()
+
+	s, err := Parse(strings.NewReader(link + "\n"))
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if len(s.Nodes) != 1 {
+		t.Fatalf("Nodes = %d, want 1", len(s.Nodes))
+	}
+	if s.Nodes[0].URI.Mode != "tcp" {
+		t.Errorf("Mode = %q, want tcp", s.Nodes[0].URI.Mode)
+	}
+}

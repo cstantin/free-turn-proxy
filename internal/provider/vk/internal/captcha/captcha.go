@@ -409,13 +409,20 @@ func (s *captchaSession) fetchCaptchaHTML(redirectURI string) (string, error) {
 }
 
 func parseCaptchaPage(html string) (*captchaPage, error) {
+	// Заглушка VK (429/5xx) - временно; поломка парсера на настоящей странице - нет,
+	// её надо эскалировать на следующий режим решения, а не ретраить вечно. Отличаем
+	// по серверным глобалам: PoW-скрипт обфусцирован, переименование его конверта -
+	// это поломка парсера, а не отсутствие страницы.
+	if !reCaptchaVKGlobal.MatchString(html) && !reCaptchaInitGlobal.MatchString(html) {
+		return nil, fmt.Errorf("%w: not a captcha page (bytes=%d)", ErrUnavailable, len(html))
+	}
 	pow, err := parsePowParams(html)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+		return nil, err
 	}
 	debugInfo := parseCaptchaDebugInfo(html)
 	if debugInfo == "" {
-		return nil, fmt.Errorf("%w: captcha debug_info not found on page", ErrUnavailable)
+		return nil, errors.New("captcha debug_info not found on page")
 	}
 	return &captchaPage{Pow: pow, DebugInfo: debugInfo, Init: parseCaptchaInitGlobal(html)}, nil
 }

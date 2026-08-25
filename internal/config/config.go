@@ -33,7 +33,16 @@ type ObfOpts struct {
 
 func (o ObfOpts) Enabled() bool { return o.Profile != ObfProfileNone }
 
+// ProxyMode задаёт тип прикладного трафика в TURN-туннеле.
+type ProxyMode string
+
+const (
+	ProxyModeUDP ProxyMode = "udp" // UDP-релей датаграмм (WireGuard)
+	ProxyModeTCP ProxyMode = "tcp" // TCP-форвардер через KCP+smux (Xray/sing-box)
+)
+
 type ProxyOpts struct {
+	Mode    ProxyMode
 	Listen  string
 	Connect string
 	Peer    string
@@ -87,6 +96,7 @@ type Client struct {
 	VK       VKOpts
 	DNS      DNSOpts
 	Log      LogOpts
+	KCP      KCPOpts
 	Tunnel   TunnelOpts
 	ClientID string
 	SubURL   string
@@ -97,5 +107,6 @@ type Server struct {
 	Obf         ObfOpts
 	Proxy       ProxyOpts
 	Log         LogOpts
+	KCP         KCPOpts
 	ClientsFile string
 }

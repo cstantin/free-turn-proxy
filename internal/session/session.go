@@ -15,6 +15,7 @@ import (
 	"github.com/samosvalishe/free-turn-proxy/internal/logx"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider"
 	"github.com/samosvalishe/free-turn-proxy/internal/provider/vk"
+	"github.com/samosvalishe/free-turn-proxy/internal/proxy/tcprelay"
 	"github.com/samosvalishe/free-turn-proxy/internal/proxy/udprelay"
 	"github.com/samosvalishe/free-turn-proxy/internal/routemgr"
 	"github.com/samosvalishe/free-turn-proxy/internal/safego"
@@ -43,6 +44,7 @@ var (
 const (
 	defaultStatusInterval       = 500 * time.Millisecond
 	defaultUDPHandshakeTimeout  = 20 * time.Second
+	defaultTCPHandshakeTimeout  = 30 * time.Second
 	defaultHandshakeConcurrency = 3
 
 	// Порог вдвое больше тика: сон короче порога всё равно пропускаем, а тик почаще
@@ -60,6 +62,7 @@ type Options struct {
 
 	StatusInterval       time.Duration
 	UDPHandshakeTimeout  time.Duration
+	TCPHandshakeTimeout  time.Duration
 	HandshakeConcurrency int
 	// WakeProbeWindow - окно проверки живости канала после пробуждения.
 	WakeProbeWindow time.Duration
@@ -73,6 +76,9 @@ func (o Options) withDefaults() Options {
 	}
 	if o.UDPHandshakeTimeout <= 0 {
 		o.UDPHandshakeTimeout = defaultUDPHandshakeTimeout
+	}
+	if o.TCPHandshakeTimeout <= 0 {
+		o.TCPHandshakeTimeout = defaultTCPHandshakeTimeout
 	}
 	if o.HandshakeConcurrency <= 0 {
 		o.HandshakeConcurrency = defaultHandshakeConcurrency
@@ -124,6 +130,7 @@ type Session struct {
 	status      atomic.Pointer[statusInfo]
 	started     atomic.Bool
 	reconnectCh chan struct{}
+	recycleCh   chan struct{}
 	wakeCh      chan struct{}
 }
 
@@ -143,6 +150,7 @@ func New(cfg *config.Client, deps Deps) (*Session, error) {
 		opts:        deps.Options.withDefaults(),
 		total:       total,
 		reconnectCh: make(chan struct{}, 1),
+		recycleCh:   make(chan struct{}, 1),
 		wakeCh:      make(chan struct{}, 1),
 	}
 	if s.opts.Traffic {
@@ -269,8 +277,12 @@ func (s *Session) Wake() {
 }
 
 func (s *Session) Reconnect() {
+	ch := s.reconnectCh
+	if s.cfg.Proxy.Mode == config.ProxyModeTCP {
+		ch = s.recycleCh
+	}
 	select {
-	case s.reconnectCh <- struct{}{}:
+	case ch <- struct{}{}:
 	default:
 	}
 }
@@ -299,7 +311,7 @@ func (s *Session) wakeNeedsRecycle(ctx context.Context) bool {
 	if s.traffic == nil {
 		return true
 	}
-	_, before := s.traffic.stats.Counters()
+	before := s.traffic.stats.LivenessRx()
 	select {
 	case <-ctx.Done():
 		return false
@@ -310,7 +322,7 @@ func (s *Session) wakeNeedsRecycle(ctx context.Context) bool {
 	case <-s.wakeCh:
 	default:
 	}
-	_, after := s.traffic.stats.Counters()
+	after := s.traffic.stats.LivenessRx()
 	if after > before {
 		log.Warnf("wake: канал жив (+%d B за %s) - рецикл не нужен", after-before, s.opts.WakeProbeWindow)
 		return false
@@ -391,13 +403,13 @@ func (s *Session) watch(ctx context.Context, cancel context.CancelFunc) error {
 
 func (s *Session) relay(ctx context.Context, prov provider.Provider, peer *net.UDPAddr) error {
 	log := s.deps.Logger
-	getCreds := func(ctx context.Context, streamID int) (string, string, []string, error) {
+	getCreds := udprelay.GetCredsFunc(func(ctx context.Context, streamID int) (string, string, []string, error) {
 		c, err := prov.GetCredentials(ctx, streamID)
 		if err != nil {
 			return "", "", nil, err
 		}
 		return c.User, c.Pass, c.ServerAddrs, nil
-	}
+	})
 
 	// host-route для IP TURN-серверов в обход VPN-туннеля.
 	var routeCallback func(net.IP)
@@ -414,6 +426,14 @@ func (s *Session) relay(ctx context.Context, prov provider.Provider, peer *net.U
 		}
 	}
 
+	if s.cfg.Proxy.Mode == config.ProxyModeTCP {
+		return s.relayTCP(ctx, prov, getCreds, peer, routeCallback)
+	}
+	return s.relayUDP(ctx, prov, getCreds, peer, routeCallback)
+}
+
+func (s *Session) relayUDP(ctx context.Context, prov provider.Provider, getCreds udprelay.GetCredsFunc, peer *net.UDPAddr, routeCallback func(net.IP)) error {
+	log := s.deps.Logger
 	local, err := s.localConn(ctx)
 	if err != nil {
 		return err
@@ -433,11 +453,38 @@ func (s *Session) relay(ctx context.Context, prov provider.Provider, peer *net.U
 		Profile:      string(s.cfg.Obf.Profile),
 		ObfKey:       s.cfg.Obf.Key,
 		ObfTiming:    s.cfg.Obf.Timing,
-		GetCreds:     udprelay.GetCredsFunc(getCreds),
+		GetCreds:     getCreds,
 		ClientID:     s.cfg.ClientID,
 		TrafficStats: s.trafficStats(),
 	}
 	return udprelay.Run(ctx, dialer, prov, log, &s.connected, routeCallback, params, peer, local, s.total)
+}
+
+func (s *Session) relayTCP(ctx context.Context, prov provider.Provider, getCreds udprelay.GetCredsFunc, peer *net.UDPAddr, routeCallback func(net.IP)) error {
+	deps := &tcprelay.Deps{
+		DTLSDialer: &dtlsdial.Dialer{
+			HandshakeTimeout: s.opts.TCPHandshakeTimeout,
+			HandshakeSem:     make(chan struct{}, s.opts.HandshakeConcurrency),
+		},
+		Auth:             prov,
+		Log:              s.deps.Logger,
+		ConnectedStreams: &s.connected,
+		OnTURNServer:     routeCallback,
+		Recycle:          s.recycleCh,
+	}
+	params := &tcprelay.Params{
+		Host:         s.cfg.TURN.Host,
+		Port:         s.cfg.TURN.Port,
+		TransportUDP: s.cfg.TURN.TransportUDP,
+		Profile:      string(s.cfg.Obf.Profile),
+		ObfKey:       s.cfg.Obf.Key,
+		ObfTiming:    s.cfg.Obf.Timing,
+		GetCreds:     getCreds,
+		KCPProfile:   s.cfg.KCP.Profile,
+		ClientID:     s.cfg.ClientID,
+		TrafficStats: s.trafficStats(),
+	}
+	return tcprelay.Run(ctx, deps, params, peer, s.cfg.Proxy.Listen, s.total)
 }
 
 func (s *Session) localConn(ctx context.Context) (net.PacketConn, error) {

@@ -1,9 +1,12 @@
 package vkauth
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	"github.com/pion/stun/v3"
 )
 
 type StreamCredentialsCache struct {
@@ -75,11 +78,22 @@ func IsAuthError(err error) bool {
 	if err == nil {
 		return false
 	}
+	// Ответ TURN-сервера приходит типизированным - код берём из него, а не из текста.
+	if turnErr, ok := errors.AsType[*stun.TurnError](err); ok {
+		switch turnErr.ErrorCodeAttr.Code {
+		// 486 - квота аллокаций: креды живы, но новую сессию по ним не поднять.
+		case stun.CodeUnauthorized, stun.CodeWrongCredentials,
+			stun.CodeStaleNonce, stun.CodeAllocQuotaReached:
+			return true
+		default:
+			return false
+		}
+	}
+	// Ошибки не от TURN-сервера (получение кредов у провайдера) типа не несут.
 	s := err.Error()
 	return strings.Contains(s, "401") ||
 		strings.Contains(s, "Unauthorized") ||
 		strings.Contains(s, "authentication") ||
 		strings.Contains(s, "invalid credential") ||
-		strings.Contains(s, "stale nonce") ||
-		strings.Contains(s, "Allocation Quota")
+		strings.Contains(s, "stale nonce")
 }

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samosvalishe/free-turn-proxy/internal/transport/kcpmux"
 	"github.com/samosvalishe/free-turn-proxy/internal/tunnel"
 	"github.com/samosvalishe/free-turn-proxy/internal/uri"
 	"github.com/samosvalishe/free-turn-proxy/internal/wire/rtpopus"
@@ -24,6 +25,7 @@ type raw struct {
 	N              int
 	StreamsPerCred int
 	Transport      string
+	Mode           string
 
 	ObfProfile string
 	ObfKey     string
@@ -44,6 +46,8 @@ type raw struct {
 	TunnelMode   string
 	TunnelConfig string
 	TunnelMTU    int
+
+	KCP kcpmux.Profile
 }
 
 // applyURI применяет параметры freeturn:// поверх raw-опций.
@@ -53,6 +57,21 @@ func (r *raw) applyURI(u *uri.Config) {
 	}
 	if u.Transport != "" {
 		r.Transport = u.Transport
+	}
+	if u.Mode != "" {
+		r.Mode = u.Mode
+	}
+	if u.KCP != nil {
+		r.KCP = kcpmux.Profile{
+			NoDelay:    u.KCP.NoDelay,
+			Interval:   u.KCP.Interval,
+			Resend:     u.KCP.Resend,
+			NC:         u.KCP.NC,
+			SndWnd:     u.KCP.SndWnd,
+			RcvWnd:     u.KCP.RcvWnd,
+			MTU:        u.KCP.MTU,
+			ACKNoDelay: u.KCP.ACKNoDelay,
+		}
 	}
 	if u.N > 0 {
 		r.N = u.N
@@ -92,6 +111,11 @@ func assemble(r raw) (*Client, error) {
 	default:
 		return nil, fmt.Errorf("invalid -transport value %q: must be %s | %s", r.Transport, TransportTCP, TransportUDP)
 	}
+	switch r.Mode {
+	case ModeUDP, ModeTCP:
+	default:
+		return nil, fmt.Errorf("invalid -mode value %q: must be %s | %s", r.Mode, ModeUDP, ModeTCP)
+	}
 	n := r.N
 	if n <= 0 {
 		n = DefaultStreams
@@ -118,6 +142,7 @@ func assemble(r raw) (*Client, error) {
 			Timing:  r.ObfTiming,
 		},
 		Proxy: ProxyOpts{
+			Mode:   ProxyMode(r.Mode),
 			Listen: r.Listen,
 			Peer:   r.Peer,
 		},
@@ -130,6 +155,7 @@ func assemble(r raw) (*Client, error) {
 		},
 		DNS: DNSOpts{Mode: r.DNSMode},
 		Log: LogOpts{Debug: r.Debug},
+		KCP: KCPOpts{Profile: r.KCP},
 		Tunnel: TunnelOpts{
 			Mode:   tunnel.Mode(r.TunnelMode),
 			Config: r.TunnelConfig,
