@@ -24,7 +24,7 @@ type Peer struct {
 	PresharedKey Key
 	AllowedIPs   []netip.Prefix
 	Endpoint     string
-	Keepalive string
+	Keepalive    string
 }
 
 type Config struct {
