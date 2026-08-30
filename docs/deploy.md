@@ -101,6 +101,41 @@ openssl rand -hex 32
 
 ---
 
+## AWG-бэкенд в Docker
+
+Образ `freeturn-awg` - VPN-бэкенд для прокси: поднимает интерфейс AmneziaWG из конфига и раздаёт NAT наружу.
+
+1. Положите конфиг `awg-quick` в `/opt/awg/awg0.conf`.
+2. Включите форвардинг на хосте: `sudo sysctl -w net.ipv4.ip_forward=1`
+3. Добавьте службу в `docker-compose.yml`:
+   ```yaml
+   services:
+     awg:
+       image: ghcr.io/samosvalishe/freeturn-awg:latest
+       container_name: freeturn-awg
+       network_mode: "host"
+       cap_add:
+         - NET_ADMIN
+       devices:
+         - /dev/net/tun
+       restart: unless-stopped
+       volumes:
+         - /opt/awg/awg0.conf:/etc/awg/awg0.conf:ro
+   ```
+4. В прокси укажите `CONNECT_ADDR=127.0.0.1:<ListenPort>`, а `ListenPort/udp` откройте в файрволе.
+
+Применить правки конфига без перезапуска: `docker exec freeturn-awg ft-awg-start sync`.
+
+| Переменная | По умолчанию | Описание |
+| --- | --- | --- |
+| `AWG_CONF` | `/etc/awg/awg0.conf` | Путь к конфигу в контейнере |
+| `AWG_IFACE` | `awg0` | Имя интерфейса |
+| `AWG_LOG_LEVEL` | `error` | Логи демона: `error` \| `verbose` \| `silent` |
+
+NAT настраивается только для IPv4.
+
+---
+
 ## Настройка Файрвола
 
 Откройте внешний порт (сервер слушает по **UDP**, даже если `MODE=tcp`):
