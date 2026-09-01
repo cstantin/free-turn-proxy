@@ -1,14 +1,24 @@
 package captcha
 
 import (
-	"context"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
-	"strconv"
-	"strings"
+	"errors"
 	"testing"
 )
+
+// Значения query в лог не уезжают - в них session_token.
+func TestSafeURL(t *testing.T) {
+	tests := []struct{ raw, want string }{
+		{"", "-"},
+		{"https://api.vk.ru/not_robot_captcha?variant=popup&domain=vk.com&session_token=jwt", "api.vk.ru/not_robot_captcha?domain,session_token,variant"},
+		{"https://id.vk.ru/", "id.vk.ru/"},
+		{"https://api.vk.ru", "api.vk.ru/"},
+	}
+	for _, tt := range tests {
+		if got := SafeURL(tt.raw); got != tt.want {
+			t.Errorf("SafeURL(%q) = %q, want %q", tt.raw, got, tt.want)
+		}
+	}
+}
 
 func TestCaptchaInitSettingContentRefPrefersSettingsKey(t *testing.T) {
 	setting := captchaInitSetting{
@@ -32,85 +42,6 @@ func TestCaptchaInitSettingContentRefLegacySettings(t *testing.T) {
 	got := setting.contentRef()
 	if got.Source != "captcha_settings" || got.Value != "legacy-settings" {
 		t.Fatalf("contentRef = %+v, want captcha_settings/legacy-settings", got)
-	}
-}
-
-func TestParseCaptchaPageSPA(t *testing.T) {
-	html := `<html><head><script>
-window.captchaPowResult = 'v2.' + btoa(JSON.stringify({ hash: hash, nonce: nonce }));
-const powInput = "Pihj7tyAHFxdwm4t";
-const difficulty = 2;
-</script>
-<script src="https://static.vk.ru/vkid/1.1.1384/not_robot_captcha.js"></script>
-</head><body><div id="spa_root"></div></body></html>`
-
-	page, err := parseCaptchaPage(html)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if page.PowInput != "Pihj7tyAHFxdwm4t" || page.PowDifficulty != 2 {
-		t.Fatalf("pow parse = %q/%d", page.PowInput, page.PowDifficulty)
-	}
-	if page.PowPrefix != "v2." {
-		t.Fatalf("pow prefix = %q, want v2.", page.PowPrefix)
-	}
-	if page.ScriptURL != "https://static.vk.ru/vkid/1.1.1384/not_robot_captcha.js" {
-		t.Fatalf("script url = %q", page.ScriptURL)
-	}
-}
-
-func TestParseCaptchaPageMissingPoW(t *testing.T) {
-	if _, err := parseCaptchaPage(`<html><body><div id="spa_root"></div></body></html>`); err == nil {
-		t.Fatal("expected error when powInput/difficulty absent")
-	}
-}
-
-// Формат конверта задаёт страница: незнакомая обёртка должна ронять авторешение,
-// а не уезжать в check заведомо неверным hash.
-func TestParseCaptchaPageMissingPowEnvelope(t *testing.T) {
-	html := `<html><head><script>
-const powInput = "Pihj7tyAHFxdwm4t";
-const difficulty = 2;
-</script></head><body></body></html>`
-	if _, err := parseCaptchaPage(html); err == nil {
-		t.Fatal("expected error when captchaPowResult envelope absent")
-	}
-}
-
-func TestSolveCaptchaPoWRawHex(t *testing.T) {
-	got, nonce := solveCaptchaPoW(context.Background(), "input", 1)
-	if len(got) != 64 {
-		t.Fatalf("pow = %q, want 64-hex", got)
-	}
-	if !strings.HasPrefix(got, "0") {
-		t.Fatalf("pow = %q, want leading zero for difficulty 1", got)
-	}
-	again, againNonce := solveCaptchaPoW(context.Background(), "input", 1)
-	if again != got || againNonce != nonce {
-		t.Fatalf("pow not deterministic: %q/%d vs %q/%d", got, nonce, again, againNonce)
-	}
-	sum := sha256.Sum256([]byte("input" + strconv.Itoa(nonce)))
-	if hex.EncodeToString(sum[:]) != got {
-		t.Fatalf("pow hash does not match sha256(input+nonce)")
-	}
-}
-
-func TestEncodePowResult(t *testing.T) {
-	got, err := encodePowResult("v2.", powResult{Hash: "00ab", Nonce: 7, DurationMs: 42})
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload, ok := strings.CutPrefix(got, "v2.")
-	if !ok {
-		t.Fatalf("pow result = %q, want v2. prefix", got)
-	}
-	raw, err := base64.StdEncoding.DecodeString(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Порядок ключей копирует JSON.stringify страницы.
-	if string(raw) != `{"hash":"00ab","nonce":7,"duration_ms":42}` {
-		t.Fatalf("pow payload = %s", raw)
 	}
 }
 
@@ -304,5 +235,61 @@ func TestSetPageURLFallsBackToWidgetOrigin(t *testing.T) {
 	s.setPageURL("not-a-url")
 	if s.pageOrigin != captchaAPIOrigin || s.pageURL != captchaAPIOrigin+"/" {
 		t.Fatalf("page = %q / %q", s.pageOrigin, s.pageURL)
+	}
+}
+
+func TestParseCaptchaDebugInfo(t *testing.T) {
+	tests := []struct {
+		name, html, want string
+	}{
+		{
+			name: "renamed key",
+			html: `<script>window.vk = {stDomain: "https://st.vk.ru", qqqqqqqq: "273cc83f-426f-4d98-9ce5-92490107e3a6", id: 0};</script>`,
+			want: "273cc83f-426f-4d98-9ce5-92490107e3a6",
+		},
+		{
+			name: "quoted keys of nested json are not candidates",
+			html: `<script>window.vk = {statsMeta: {"hash":"X84u4GhF","uuid":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}, k: "273cc83f-426f-4d98-9ce5-92490107e3a6"};</script>`,
+			want: "273cc83f-426f-4d98-9ce5-92490107e3a6",
+		},
+		{name: "no window.vk", html: `<script>var x = 1;</script>`},
+		{name: "no uuid in block", html: `<script>window.vk = {id: 0, logoutUrl: ""};</script>`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseCaptchaDebugInfo(tt.html); got != tt.want {
+				t.Fatalf("debug_info = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseCaptchaDebugInfoAmbiguous(t *testing.T) {
+	html := `<script>window.vk = {a: "273cc83f-426f-4d98-9ce5-92490107e3a6", b: "ec772ebb-0d69-4fa0-b974-904549c8a7d1"};</script>`
+	if got := parseCaptchaDebugInfo(html); got != "273cc83f-426f-4d98-9ce5-92490107e3a6" {
+		t.Fatalf("debug_info = %q", got)
+	}
+}
+
+func TestParseCaptchaPageRejectsNonCaptchaHTML(t *testing.T) {
+	t.Parallel()
+	_, err := parseCaptchaPage("<html><head><title>429 Too Many Requests</title></head><body></body></html>")
+	if !errors.Is(err, ErrUnavailable) {
+		t.Fatalf("err = %v, want ErrUnavailable", err)
+	}
+}
+
+// Смена обфускации - не аутаж: ошибка обязана дойти до эскалации на другой решатель.
+// Переименованный конверт PoW - именно этот случай, страница настоящая.
+func TestParseCaptchaPageBrokenParserIsNotUnavailable(t *testing.T) {
+	t.Parallel()
+	for name, html := range map[string]string{
+		"pow renamed":  `<script>window.vk = {}; window.zzz = "v2." + solve();</script>`,
+		"debug absent": `<script>window.init = {};</script>`,
+	} {
+		_, err := parseCaptchaPage(html)
+		if err == nil || errors.Is(err, ErrUnavailable) {
+			t.Fatalf("%s: err = %v, want plain parse error", name, err)
+		}
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"strconv"
+	"strings"
 
 	fhttp "github.com/bogdanfinn/fhttp"
 	"github.com/bogdanfinn/tls-client/profiles"
@@ -17,6 +18,9 @@ const (
 	uaWindows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
 	uaMac     = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36"
 	uaAndroid = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Mobile Safari/537.36"
+
+	timezoneMoscow    = "Europe/Moscow"
+	touchPointsMobile = 5
 )
 
 type Platform string
@@ -26,8 +30,7 @@ const (
 	Mobile  Platform = "mobile"
 )
 
-// PlatformFromString мапит строку флага -platform в Platform. Пустое/неизвестное -
-// Desktop.
+// PlatformFromString преобразует строку в Platform (по умолчанию Desktop).
 func PlatformFromString(s string) Platform {
 	if s == string(Mobile) {
 		return Mobile
@@ -35,11 +38,7 @@ func PlatformFromString(s string) Platform {
 	return Desktop
 }
 
-// Profile - самосогласованная браузерная личность: единственный источник UA,
-// client hints, device-fingerprint, порядка заголовков и набора JS-возможностей
-// для VK control-plane и captcha. Строится один раз из Platform и Identity; не
-// мутируется в рантайме. Семейство всегда Chrome: только Chromium даёт NetworkInformation и
-// Generic Sensors, без которых телеметрия captcha неполна.
+// Profile содержит браузерные параметры и отпечатки (UA, client hints, device fingerprint).
 type Profile struct {
 	Platform        Platform
 	UserAgent       string
@@ -47,17 +46,67 @@ type Profile struct {
 	SecChUaMobile   string
 	SecChUaPlatform string
 	AcceptLanguage  string
-	// DeviceJSON - navigator/screen fingerprint для captcha componentDone.
-	DeviceJSON string
-	// VisitorID - идентификатор FingerprintJS этой личности.
-	VisitorID string
+	DeviceJSON      string
+	VisitorID       string
+
+	cores     int
+	memGB     int
+	webdriver bool
+	dev       device
 }
 
 func (p Profile) IsMobile() bool { return p.Platform == Mobile }
 
-// device - то, что виджет captcha собирает из navigator/screen. Порядок полей
-// повторяет порядок ключей в объекте виджета, отсутствующие в браузере поля
-// выпадают из JSON так же, как undefined выпадает у JSON.stringify.
+func (p Profile) HardwareConcurrency() int { return p.cores }
+
+func (p Profile) Webdriver() bool { return p.webdriver }
+
+func (p Profile) DeviceMemory() *int {
+	if p.memGB == 0 {
+		return nil
+	}
+	return &p.memGB
+}
+
+func (p Profile) Languages() []string { return p.dev.Languages }
+
+func (p Profile) DevicePixelRatio() float64 { return p.dev.DevicePixelRatio }
+
+func (Profile) Timezone() string { return timezoneMoscow }
+
+func (p Profile) MaxTouchPoints() int {
+	if p.IsMobile() {
+		return touchPointsMobile
+	}
+	return 0
+}
+
+func (p Profile) Orientation() string {
+	if p.IsMobile() {
+		return "portrait-primary"
+	}
+	return "landscape-primary"
+}
+
+func (p Profile) PlatformName() string { return strings.Trim(p.SecChUaPlatform, `"`) }
+
+type Brand struct {
+	Brand   string `json:"brand"`
+	Version string `json:"version"`
+}
+
+func (p Profile) Brands() []Brand {
+	out := make([]Brand, 0, 3)
+	for _, part := range strings.Split(p.SecChUa, ", ") {
+		name, ver, ok := strings.Cut(part, ";v=")
+		if !ok {
+			continue
+		}
+		out = append(out, Brand{Brand: strings.Trim(name, `"`), Version: strings.Trim(ver, `"`)})
+	}
+	return out
+}
+
 type device struct {
 	ScreenWidth             int      `json:"screenWidth"`
 	ScreenHeight            int      `json:"screenHeight"`
@@ -72,14 +121,9 @@ type device struct {
 	HardwareConcurrency     int      `json:"hardwareConcurrency"`
 	DeviceMemory            *int     `json:"deviceMemory,omitempty"`
 	ConnectionEffectiveType string   `json:"connectionEffectiveType,omitempty"`
-	// NotificationsPermission - состояние permissions.query({name:"notifications"}).
-	// Дефолт живого браузера - prompt; denied означало бы явный отказ пользователя.
-	NotificationsPermission string `json:"notificationsPermission"`
+	NotificationsPermission string   `json:"notificationsPermission"`
 }
 
-// Порядок заголовков h2. Отсутствующие в запросе имена fhttp пропускает, поэтому
-// один список покрывает и навигацию (upgrade-insecure-requests, sec-fetch-user),
-// и fetch/XHR (origin, content-type).
 var chromeHeaderOrder = []string{
 	"content-length",
 	"sec-ch-ua-platform",
@@ -101,8 +145,6 @@ var chromeHeaderOrder = []string{
 	"priority",
 }
 
-// spec - варьируемая часть персоны: всё, чем реально различаются машины одной
-// платформы. Остальное (Chrome-версия, язык, порядок заголовков) общее.
 type spec struct {
 	userAgent  string
 	chPlatform string
@@ -116,28 +158,23 @@ var desktopSpecs = []spec{
 	{userAgent: uaMac, chPlatform: `"macOS"`, dev: newDevice(1512, 982, 944, 1147, 870, 2, 10, 8)},
 }
 
-// Chrome морозит мобильный UA до "Android 10; K" на всех устройствах, поэтому
-// персоны различаются только железом.
 var mobileSpecs = []spec{
+	{userAgent: uaAndroid, chPlatform: `"Android"`, dev: newDevice(364, 793, 793, 363, 671, 3.5, 8, 8)},
 	{userAgent: uaAndroid, chPlatform: `"Android"`, dev: newDevice(393, 852, 852, 393, 659, 3, 8, 8)},
 	{userAgent: uaAndroid, chPlatform: `"Android"`, dev: newDevice(412, 915, 915, 412, 724, 2.625, 8, 4)},
 	{userAgent: uaAndroid, chPlatform: `"Android"`, dev: newDevice(360, 800, 800, 360, 612, 3, 8, 4)},
 	{userAgent: uaAndroid, chPlatform: `"Android"`, dev: newDevice(384, 832, 832, 384, 644, 2.75, 8, 8)},
 }
 
-// Identity - семя личности: одна и та же Identity всегда даёт один и тот же
-// Profile, включая VisitorID.
+// Identity идентифицирует браузерную личность и её поколение.
 type Identity struct {
-	// Seed - стабильная строка установки: личность переживает перезапуск.
 	Seed string
-	// Gen растёт при сжигании персоны: отвергнутый отпечаток не переиспользуется
-	// до конца процесса, но между запусками возвращается.
-	Gen int
+	Gen  int
 }
 
 func (id Identity) String() string { return id.Seed + "|" + strconv.Itoa(id.Gen) }
 
-// For строит персону для platform и identity. Неизвестная platform -> Desktop.
+// For генерирует профиль браузера для указанной платформы и идентичности.
 func For(p Platform, id Identity) Profile {
 	specs := desktopSpecs
 	if p == Mobile {
@@ -166,7 +203,6 @@ func For(p Platform, id Identity) Profile {
 	return profile
 }
 
-// newDevice дополняет варьируемые поля общими для всех персон.
 func newDevice(screenW, screenH, availH, innerW, innerH int, dpr float64, cores, memGB int) device {
 	memory := memGB
 	return device{
@@ -194,12 +230,14 @@ func withDevice(p Profile, d device) Profile {
 		return p
 	}
 	p.DeviceJSON = string(data)
+	p.dev = d
+	p.cores, p.webdriver = d.HardwareConcurrency, d.Webdriver
+	if d.DeviceMemory != nil {
+		p.memGB = *d.DeviceMemory
+	}
 	return p
 }
 
-// ClientProfile - TLS/HTTP2-отпечаток персоны (JA3 + ALPN + h2 settings + порядок
-// псевдозаголовков). Chrome использует один TLS-стек на всех платформах, поэтому
-// platform на него не влияет.
 func (Profile) ClientProfile() profiles.ClientProfile {
 	return profiles.Chrome_146
 }
@@ -210,7 +248,6 @@ func ApplyFhttp(req *fhttp.Request, profile Profile) {
 	req.Header.Set("sec-ch-ua-mobile", profile.SecChUaMobile)
 	req.Header.Set("sec-ch-ua-platform", profile.SecChUaPlatform)
 	req.Header.Set("Accept-Language", profile.AcceptLanguage)
-	// Навигация документа идёт с нулевым приоритетом, u=1 - профиль fetch/XHR.
 	if req.Header.Get("Sec-Fetch-Dest") == "document" {
 		req.Header.Set("Priority", "u=0, i")
 	} else {
