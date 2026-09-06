@@ -174,14 +174,18 @@ func Wake() {
 // Reconnect пересоздаёт TURN-аллокации, не трогая туннель и tun-дескриптор.
 // В прямом режиме вместо них пересоздаются сокеты bind.
 func Reconnect() {
-	mu.Lock()
-	defer mu.Unlock()
 	l := current.Load()
 	if l == nil {
 		return
 	}
 	if !l.direct() {
 		l.sess.Reconnect()
+		return
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	l = current.Load()
+	if l == nil || !l.direct() {
 		return
 	}
 	if r, ok := l.tunnel.backend.(tunnel.Rebinder); ok {

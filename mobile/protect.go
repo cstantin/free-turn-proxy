@@ -28,8 +28,9 @@ func SetProtect(p Protector) {
 	})
 }
 
-func protectFD(fd int) {
+func protectFD(fd int) bool {
 	if p := protector.Load(); p != nil {
-		(*p).Protect(fd)
+		return (*p).Protect(fd)
 	}
+	return false
 }

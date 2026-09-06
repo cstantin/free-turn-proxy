@@ -132,7 +132,7 @@ openssl rand -hex 32
 | `AWG_IFACE` | `awg0` | Имя интерфейса |
 | `AWG_LOG_LEVEL` | `error` | Логи демона: `error` \| `verbose` \| `silent` |
 
-NAT настраивается только для IPv4.
+NAT настраивается только для IPv4 (контейнер использует network_mode: host и добавляет правила iptables в стек хоста).
 
 ---
 

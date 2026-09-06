@@ -334,3 +334,60 @@ func TestFillRatesFirstCall(t *testing.T) {
 		t.Errorf("rates = %d/%d, want 0/0", s.TxRate, s.RxRate)
 	}
 }
+
+type testProtector struct {
+	protected []int
+	ok        bool
+}
+
+func (p *testProtector) Protect(fd int) bool {
+	p.protected = append(p.protected, fd)
+	return p.ok
+}
+
+func TestProtectFDReturnsStatus(t *testing.T) {
+	SetProtect(nil)
+	if protectFD(42) {
+		t.Error("protectFD() = true when no protector set")
+	}
+
+	p := &testProtector{ok: true}
+	SetProtect(p)
+	t.Cleanup(func() { SetProtect(nil) })
+
+	if !protectFD(42) {
+		t.Error("protectFD(42) = false, want true")
+	}
+	if len(p.protected) != 1 || p.protected[0] != 42 {
+		t.Errorf("protected = %v, want [42]", p.protected)
+	}
+
+	p.ok = false
+	if protectFD(43) {
+		t.Error("protectFD(43) = true, want false when protect fails")
+	}
+}
+
+type stubRebinder struct {
+	stubBackend
+	rebound int
+}
+
+func (s *stubRebinder) Rebind() error {
+	s.rebound++
+	return nil
+}
+
+func TestDirectReconnectInvokesRebind(t *testing.T) {
+	reb := &stubRebinder{}
+	current.Store(&live{
+		tunnel: &tunnelParts{backend: reb},
+	})
+	t.Cleanup(func() { current.Store(nil) })
+
+	Reconnect()
+
+	if reb.rebound != 1 {
+		t.Errorf("rebound = %d, want 1", reb.rebound)
+	}
+}

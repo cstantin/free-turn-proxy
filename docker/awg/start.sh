@@ -8,7 +8,7 @@ IFACE="${AWG_IFACE:-awg0}"
 
 # Значения ключа из [Interface] (до первого [Peer]), по одному на строку.
 _iface_vals() {
-    sed -n "/^[[:space:]]*\[Peer\]/q; s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$CONF" \
+    sed -n "/^[[:space:]]*\[[pP][eE][eE][rR]\]/q; s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//Ip" "$CONF" \
         | sed 's/[#;].*//' | tr -d ' \r' | tr ',' '\n' | grep -v '^$' || true
 }
 
@@ -67,14 +67,25 @@ ip link set mtu "$MTU" up dev "$IFACE"
 NET=$(ip -4 route show dev "$IFACE" proto kernel scope link | awk '{print $1; exit}')
 WAN=$(ip route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="dev"){print $(i+1); exit}}')
 
+_ipt() {
+    local tbl=()
+    if [ "$1" = "-t" ]; then
+        tbl=(-t "$2")
+        shift 2
+    fi
+    if ! iptables "${tbl[@]}" -C "$@" 2>/dev/null; then
+        iptables "${tbl[@]}" -A "$@"
+    fi
+}
+
 if [ -n "$WAN" ] && [ -n "$NET" ]; then
-    iptables -A FORWARD -i "$IFACE" -j ACCEPT
-    iptables -A FORWARD -o "$IFACE" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-    iptables -t nat -A POSTROUTING -s "$NET" -o "$WAN" -j MASQUERADE
+    _ipt FORWARD -i "$IFACE" -j ACCEPT
+    _ipt FORWARD -o "$IFACE" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+    _ipt -t nat POSTROUTING -s "$NET" -o "$WAN" -j MASQUERADE
     # -o WAN: ответный SYN-ACK из интернета несёт MSS 1460, режем по PMTU пути.
     # -o IFACE: страховка от клиента, забывшего MTU.
-    iptables -t mangle -A FORWARD -o "$WAN" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
-    iptables -t mangle -A FORWARD -o "$IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss "$((MTU - 40))"
+    _ipt -t mangle FORWARD -o "$WAN" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+    _ipt -t mangle FORWARD -o "$IFACE" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --set-mss "$((MTU - 40))"
 else
     echo "ft-awg: WAN or subnet not detected (wan='$WAN' net='$NET'); NAT skipped" >&2
 fi

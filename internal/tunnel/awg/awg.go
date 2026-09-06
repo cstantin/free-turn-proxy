@@ -20,7 +20,7 @@ type Deps struct {
 	Bind conn.Bind
 	Log  logx.Logger
 	// Protect исключает сокеты bind из туннеля (VpnService.protect); nil - бэкенд поверх пайпа релея.
-	Protect func(fd int)
+	Protect func(fd int) bool
 }
 
 type Backend struct {
@@ -109,15 +109,21 @@ func (b *Backend) protectBind(dev *device.Device) {
 	}
 	protected := 0
 	if fd, err := peek.PeekLookAtSocketFd4(); err == nil {
-		b.deps.Protect(fd)
-		protected++
+		if b.deps.Protect(fd) {
+			protected++
+		} else {
+			b.deps.Log.Warnf("tunnel: failed to protect ipv4 socket fd=%d", fd)
+		}
 	}
 	if fd, err := peek.PeekLookAtSocketFd6(); err == nil {
-		b.deps.Protect(fd)
-		protected++
+		if b.deps.Protect(fd) {
+			protected++
+		} else {
+			b.deps.Log.Warnf("tunnel: failed to protect ipv6 socket fd=%d", fd)
+		}
 	}
 	if protected == 0 {
-		b.deps.Log.Warnf("tunnel: no bind socket to protect")
+		b.deps.Log.Warnf("tunnel: no bind socket protected")
 	}
 }
 
@@ -135,6 +141,7 @@ func (b *Backend) Down() error {
 	return nil
 }
 
+// Stats возвращает текущие счетчики трафика туннеля.
 func (b *Backend) Stats() (tunnel.Stats, error) {
 	b.mu.Lock()
 	dev := b.dev

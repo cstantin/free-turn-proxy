@@ -107,7 +107,7 @@ jobs:
         id: tags
         run: |
           version="${GITHUB_REF_NAME#v}"
-          repo="ghcr.io/${{ github.repository_owner }}/freeturn-awg"
+          repo=$(echo "ghcr.io/${{ github.repository_owner }}/freeturn-awg" | tr '[:upper:]' '[:lower:]')
           {
             echo "version=${version}"
             echo "list<<EOF"

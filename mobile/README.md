@@ -125,14 +125,16 @@ WireGuard общается с релеем через in-memory `netconn.PacketP
 
 ```kotlin
 pfd = builder.establish()!!
-Mobile.startDirectTunnel(wgConf, 1376, pfd.dup().detachFd().toLong())
+Mobile.startDirectTunnel(wgConf, 1376L, pfd.dup().detachFd().toLong())
 ```
 
 Отличия от `StartTunnel`:
 
-*   каждый `[Peer]` обязан нести `Endpoint` в виде `ip:port` - bind устройства не резолвит имена;
+*   каждый `[Peer]` обязан нести `Endpoint` в виде `ip:port` - bind устройства не резолвит имена (если в конфиге указан домен, хост должен отрезолвить его до вызова);
 *   `SetProtect` обязателен: сокеты открывает bind устройства, без защиты трафик заворачивается обратно в туннель;
+*   состояние и метрики отслеживаются через `GetState()` (polling); push-события `OnState` в `EventSink` генерируются только для релейных сессий;
 *   `GetState()` держит `connected` с первого handshake и уходит в `connecting`, только если handshake старше 180 с при идущем tx; `Streams`/`Total` всегда 1;
+*   `Wake()` в прямом режиме - no-op; при смене сети или выходе устройства из сна вызывается `Reconnect()`;
 *   `Reconnect()` пересоздаёт и заново защищает сокеты - этого хватает при смене сети, перезапуск не нужен;
 *   `Restart` работает только с JSON-конфигурацией: для смены параметров прямого туннеля нужен `Stop` и новый `StartDirectTunnel`;
 *   `mtu` идёт только в валидацию и логи: tun создаёт платформа, MTU для неё даёт `ParseTunnelConfig`.
