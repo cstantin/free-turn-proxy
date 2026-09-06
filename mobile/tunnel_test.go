@@ -310,10 +310,11 @@ func TestDirectSnapshotErrorKeepsStreams(t *testing.T) {
 
 // Скорость берётся из дельты между опросами хоста.
 func TestFillRatesUsesDelta(t *testing.T) {
-	l := &live{prevTx: 1000, prevRx: 500, prevAt: time.Now().Add(-2 * time.Second)}
+	now := time.Now()
+	l := &live{prevTx: 1000, prevRx: 500, prevAt: now.Add(-2 * time.Second)}
 	s := &Snapshot{TxTotal: 3000, RxTotal: 1500}
 
-	l.fillRates(s)
+	l.fillRatesAt(s, now)
 
 	if s.TxRate != 1000 || s.RxRate != 500 {
 		t.Errorf("rates = %d/%d, want 1000/500", s.TxRate, s.RxRate)

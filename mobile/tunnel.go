@@ -3,6 +3,7 @@ package mobile
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/netip"
 	"strings"
@@ -256,13 +257,16 @@ func directSnapshot(l *live) *Snapshot {
 }
 
 func (l *live) fillRates(s *Snapshot) {
+	l.fillRatesAt(s, time.Now())
+}
+
+func (l *live) fillRatesAt(s *Snapshot, now time.Time) {
 	l.rateMu.Lock()
 	defer l.rateMu.Unlock()
 
-	now := time.Now()
 	if dt := now.Sub(l.prevAt).Seconds(); !l.prevAt.IsZero() && dt > 0 {
-		s.TxRate = int64(float64(s.TxTotal-l.prevTx) / dt)
-		s.RxRate = int64(float64(s.RxTotal-l.prevRx) / dt)
+		s.TxRate = int64(math.Round(float64(s.TxTotal-l.prevTx) / dt))
+		s.RxRate = int64(math.Round(float64(s.RxTotal-l.prevRx) / dt))
 	}
 	l.prevTx, l.prevRx, l.prevAt = s.TxTotal, s.RxTotal, now
 }
