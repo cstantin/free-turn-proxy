@@ -439,3 +439,64 @@ EOF
     [ "$status" -eq 0 ]
     [[ "$output" == *"Free Turn Proxy & AmneziaWG"* ]]
 }
+
+@test "compose_cmd делегирует вызовы в docker compose или docker-compose" {
+    run bash -c "
+        source '$SCRIPT'
+        docker() {
+            if [ \"\$1\" = 'compose' ]; then
+                echo \"MOCK_COMPOSE: \${*:2}\"
+                return 0
+            fi
+            return 1
+        }
+        export -f docker
+        compose_cmd version
+    "
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"MOCK_COMPOSE: version"* ]]
+
+    run bash -c "
+        source '$SCRIPT'
+        docker() { return 1; }
+        docker-compose() {
+            echo \"MOCK_STANDALONE: \$*\"
+            return 0
+        }
+        export -f docker docker-compose
+        compose_cmd up -d
+    "
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"MOCK_STANDALONE: up -d"* ]]
+}
+
+@test "ensure_compose успешно завершается, если docker compose уже установлен" {
+    run bash -c "
+        source '$SCRIPT'
+        docker() {
+            if [ \"\$1\" = 'compose' ] && [ \"\$2\" = 'version' ]; then
+                return 0
+            fi
+            return 1
+        }
+        export -f docker
+        ensure_compose
+    "
+    [ "$status" -eq 0 ]
+}
+
+@test "ensure_awg_image возвращает 0, если образ уже присутствует локально" {
+    run bash -c "
+        source '$SCRIPT'
+        INSTALL_AWG=1
+        docker() {
+            if [ \"\$1\" = 'image' ] && [ \"\$2\" = 'inspect' ]; then
+                return 0
+            fi
+            return 1
+        }
+        export -f docker
+        ensure_awg_image
+    "
+    [ "$status" -eq 0 ]
+}
