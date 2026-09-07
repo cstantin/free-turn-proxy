@@ -29,6 +29,7 @@ type Config struct {
 	ManualCaptcha  bool
 	KCP            *KCP
 	Comment        string
+	WGConf         string
 }
 
 // wire - JSON-схема freeturn:// ссылок.
@@ -49,6 +50,7 @@ type wire struct {
 	ManualCaptcha  bool   `json:"mcap,omitempty"`
 	KCP            *KCP   `json:"kcp,omitempty"`
 	Name           string `json:"name,omitempty"`
+	WGConf         string `json:"wg,omitempty"`
 }
 
 // Parse разбирает строку freeturn://<base64url(json)>.
@@ -97,6 +99,7 @@ func Parse(s string) (*Config, error) {
 		ManualCaptcha:  w.ManualCaptcha,
 		KCP:            w.KCP,
 		Comment:        w.Name,
+		WGConf:         w.WGConf,
 	}, nil
 }
 
@@ -117,6 +120,7 @@ func (c *Config) String() string {
 		ManualCaptcha:  c.ManualCaptcha,
 		KCP:            c.KCP,
 		Name:           c.Comment,
+		WGConf:         c.WGConf,
 	}
 	if c.ObfProfile != "" && c.ObfProfile != "none" {
 		w.Obf = c.ObfProfile
