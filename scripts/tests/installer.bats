@@ -484,3 +484,19 @@ EOF
     "
     [ "$status" -eq 0 ]
 }
+
+@test "ensure_awg_image возвращает 0, если образ уже присутствует локально" {
+    run bash -c "
+        source '$SCRIPT'
+        INSTALL_AWG=1
+        docker() {
+            if [ \"\$1\" = 'image' ] && [ \"\$2\" = 'inspect' ]; then
+                return 0
+            fi
+            return 1
+        }
+        export -f docker
+        ensure_awg_image
+    "
+    [ "$status" -eq 0 ]
+}

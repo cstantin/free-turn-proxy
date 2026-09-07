@@ -1002,6 +1002,47 @@ init_awg_params() {
     AWG_HPK="$(openssl rand 32 2>/dev/null | base64 | tr -d '\r\n')"
 }
 
+ensure_awg_image() {
+    [ "$INSTALL_AWG" = "1" ] || return 0
+    command -v docker >/dev/null 2>&1 || return 0
+    if docker image inspect "${AWG_IMAGE}" >/dev/null 2>&1; then
+        return 0
+    fi
+    if docker pull "${AWG_IMAGE}" >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local script_dir repo_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "")"
+    repo_dir="$(cd "$script_dir/.." 2>/dev/null && pwd || echo "")"
+    if [ -f "$repo_dir/docker/awg/Dockerfile" ]; then
+        if [ "$_IS_RPC" = 1 ]; then
+            docker build -t "${AWG_IMAGE}" -f "$repo_dir/docker/awg/Dockerfile" "$repo_dir" >/dev/null 2>&1 || true
+        else
+            ui_spin "Сборка Docker-образа AmneziaWG" docker build -t "${AWG_IMAGE}" -f "$repo_dir/docker/awg/Dockerfile" "$repo_dir" || true
+        fi
+        if docker image inspect "${AWG_IMAGE}" >/dev/null 2>&1; then
+            return 0
+        fi
+    fi
+
+    local bdir raw_url
+    bdir="$(mktemp -d)"
+    raw_url="https://raw.githubusercontent.com/${REPO}/master"
+    if curl -fsSL "$raw_url/docker/awg/Dockerfile" -o "$bdir/Dockerfile" 2>/dev/null && \
+       mkdir -p "$bdir/docker/awg" && \
+       curl -fsSL "$raw_url/docker/awg/start.sh" -o "$bdir/docker/awg/start.sh" 2>/dev/null; then
+        if [ "$_IS_RPC" = 1 ]; then
+            docker build -t "${AWG_IMAGE}" "$bdir" >/dev/null 2>&1 || true
+        else
+            ui_spin "Сборка Docker-образа AmneziaWG" docker build -t "${AWG_IMAGE}" "$bdir" || true
+        fi
+    fi
+    rm -rf "$bdir"
+
+    docker image inspect "${AWG_IMAGE}" >/dev/null 2>&1 || die "Не удалось получить или собрать образ ${AWG_IMAGE}."
+}
+
 generate_awg_keypair() {
     local priv="" pub=""
     if command -v awg >/dev/null 2>&1; then
@@ -1011,6 +1052,7 @@ generate_awg_keypair() {
         priv="$(docker exec "$AWG_CONTAINER" awg genkey 2>/dev/null || true)"
         [ -n "$priv" ] && pub="$(docker exec -i "$AWG_CONTAINER" awg pubkey <<< "$priv" 2>/dev/null || true)"
     elif command -v docker >/dev/null 2>&1; then
+        ensure_awg_image
         priv="$(docker run --rm "${AWG_IMAGE}" awg genkey 2>/dev/null || true)"
         [ -n "$priv" ] && pub="$(docker run --rm -i "${AWG_IMAGE}" awg pubkey <<< "$priv" 2>/dev/null || true)"
     elif command -v wg >/dev/null 2>&1; then
@@ -1475,11 +1517,22 @@ apply_docker() {
     } > "$COMPOSE_FILE"
     chmod 0600 "$COMPOSE_FILE"
 
+    if [ "$INSTALL_FREETURN" = "1" ]; then
+        if [ "$_IS_RPC" = 1 ]; then
+            docker pull "${IMAGE}:$(image_tag)" >/dev/null 2>&1 || true
+        else
+            ui_spin "Загрузка Docker-образа FreeTurn" docker pull "${IMAGE}:$(image_tag)" || true
+        fi
+    fi
+
+    if [ "$INSTALL_AWG" = "1" ]; then
+        ensure_awg_image
+    fi
+
     if [ "$_IS_RPC" = 1 ]; then
-        ( cd "$APP_DIR" && compose_cmd pull >/dev/null 2>&1 && compose_cmd up -d >/dev/null 2>&1 ) \
+        ( cd "$APP_DIR" && compose_cmd up -d >/dev/null 2>&1 ) \
             || fail compose_up_failed "docker compose up failed"
     else
-        ( cd "$APP_DIR" && ui_spin "Загрузка Docker-образов" compose_cmd pull ) || die "docker compose pull не удался."
         ( cd "$APP_DIR" && ui_spin "Запуск служб" compose_cmd up -d ) || die "docker compose up не удался."
     fi
     healthcheck_docker
