@@ -433,3 +433,9 @@ EOF
     "
     [ "$status" -ne 0 ]
 }
+
+@test "запуск через пайп (curl | bash) корректно обрабатывает параметры без ошибки unbound variable" {
+    run bash -c "cat '$SCRIPT' | bash -s -- -h"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"Free Turn Proxy & AmneziaWG"* ]]
+}
