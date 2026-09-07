@@ -325,8 +325,11 @@ ui_spin() {
     local title="$1"; shift
     local rc=0 log; log="$(mktemp)"
     if [ "$HAS_GUM" = 1 ]; then
-        if gum spin --spinner dot --spinner.foreground "$MD_PRIMARY" --title "$title" \
-            -- bash -c '"$@" >"$0" 2>&1' "$log" "$@"; then rc=0; else rc=$?; fi
+        ( "$@" >"$log" 2>&1 ) &
+        local pid=$!
+        gum spin --spinner dot --spinner.foreground "$MD_PRIMARY" --title "$title" \
+            -- bash -c 'while kill -0 "$1" 2>/dev/null; do sleep 0.1; done' _ "$pid" 2>/dev/null || true
+        wait "$pid" 2>/dev/null && rc=0 || rc=$?
         if [ "$rc" -eq 0 ]; then log_success "$title"
         else
             log_error "$title - ошибка (код $rc)"
@@ -338,7 +341,7 @@ ui_spin() {
         while kill -0 "$pid" 2>/dev/null; do
             i=$(((i + 1) % 4)); printf "\r${C_CYAN}[*]${C_NC} %s %s" "$title" "${ch:$i:1}"; sleep 0.2
         done
-        wait "$pid" && rc=0 || rc=$?
+        wait "$pid" 2>/dev/null && rc=0 || rc=$?
         if [ "$rc" -eq 0 ]; then printf "\r${C_GREEN}[+]${C_NC} %s\033[K\n" "$title"
         else printf "\r${C_RED}[x]${C_NC} %s\033[K\n" "$title"; tail -n 40 "$log" >&2; fi
     else
@@ -1198,7 +1201,7 @@ wg_reconcile() {
 _pub_fs() { printf '%s' "$1" | tr '/+' '_-' | tr -d '='; }
 
 generate_freeturn_uri() {
-    local peer="$1" mode="$2" obf="$3" key="$4" cid="${5:-}" name="${6:-}"
+    local peer="$1" mode="$2" obf="$3" key="$4" cid="${5:-}" name="${6:-}" wg_conf="${7:-}"
     local json b64
     json="{\"v\":1,\"provider\":\"$(esc "${PROVIDER:-vk}")\",\"peer\":\"$(esc "$peer")\""
     if [ -n "$mode" ] && [ "$mode" != "udp" ]; then
@@ -1214,6 +1217,9 @@ generate_freeturn_uri() {
     fi
     if [ -n "$name" ]; then
         json="$json,\"name\":\"$(esc "$name")\""
+    fi
+    if [ -n "$wg_conf" ]; then
+        json="$json,\"wg\":\"$(esc "$wg_conf")\""
     fi
     json="$json}"
     b64=$(printf '%s' "$json" | openssl base64 -A 2>/dev/null || printf '%s' "$json" | base64 | tr -d '\r\n')
@@ -2203,17 +2209,29 @@ EOF
         [ -n "$cid" ] && printf '%s\n' "$cid" > "$SHARE_DIR/$(_pub_fs "$cli_pub").cid" 2>/dev/null || true
     fi
 
-    local ft_uri=""
+    local ft_uri="" ft_vpn_uri=""
     if [ "$INSTALL_FREETURN" = "1" ]; then
         ft_uri="$(generate_freeturn_uri "${ext_ip}:${LISTEN_PORT}" "${PROXY_MODE}" "${OBF_PROFILE}" "${OBF_KEY}" "${cid}" "${cname}")"
         ft_file="${CLIENTS_DIR}/${cname}-freeturn.txt"
         echo "$ft_uri" > "$ft_file"; chmod 0600 "$ft_file"
+
+        if [ -f "$relay_conf" ]; then
+            ft_vpn_uri="$(generate_freeturn_uri "${ext_ip}:${LISTEN_PORT}" "${PROXY_MODE}" "${OBF_PROFILE}" "${OBF_KEY}" "${cid}" "${cname}" "$(<"$relay_conf")")"
+            ft_vpn_file="${CLIENTS_DIR}/${cname}-freeturn-vpn.txt"
+            echo "$ft_vpn_uri" > "$ft_vpn_file"; chmod 0600 "$ft_vpn_file"
+        fi
     fi
 
     echo "${cname}|${client_ip}|${cid}|$(date '+%Y-%m-%d %H:%M')" >> "$CLIENTS_META"
     log_success "Клиент '${cname}' добавлен!"
 
-    if [ -n "$ft_uri" ]; then
+    if [ -n "$ft_vpn_uri" ]; then
+        render_qr_text "$ft_vpn_uri" "QR-код для FreeTurn App (со вшитым VPN - ${cname}):"
+        echo
+        log_info "Ссылка FreeTurn VPN (All-in-One): $ft_vpn_uri"
+        log_info "Ссылка FreeTurn Proxy (только релей): $ft_uri"
+        [ -n "$cid" ] && log_info "Client ID: $cid"
+    elif [ -n "$ft_uri" ]; then
         render_qr_text "$ft_uri" "QR-код для приложения FreeTurn (${cname}):"
         echo
         log_info "Ссылка FreeTurn: $ft_uri"
@@ -2221,6 +2239,7 @@ EOF
     fi
 
     if [ -f "$direct_conf" ]; then
+        echo
         render_qr_file "$direct_conf" "QR-код для AmneziaWG Direct (${cname}):"
         echo
         log_info "Конфиг AmneziaWG Direct: $direct_conf"
@@ -2253,9 +2272,10 @@ client_qr() {
 
     if [ -z "$mode" ]; then
         local opts=()
-        [ -f "${CLIENTS_DIR}/${cname}-freeturn.txt" ] && opts+=(freeturn "Приложение FreeTurn (freeturn://)")
+        [ -f "${CLIENTS_DIR}/${cname}-freeturn-vpn.txt" ] && opts+=(freeturn_vpn "FreeTurn App (со вшитым VPN)")
+        [ -f "${CLIENTS_DIR}/${cname}-freeturn.txt" ] && opts+=(freeturn "FreeTurn App (прокси-режим)")
         [ -f "${CLIENTS_DIR}/${cname}-direct.conf" ] && opts+=(direct "AmneziaWG Direct (AWG 3.1)")
-        [ -f "${CLIENTS_DIR}/${cname}-relay.conf" ] && opts+=(relay "FreeTurn Relay (WireGuard)")
+        [ -f "${CLIENTS_DIR}/${cname}-relay.conf" ] && opts+=(relay "FreeTurn Relay (WireGuard/AWG)")
         if [ "${#opts[@]}" -gt 2 ]; then
             ui_menu mode "Формат QR-кода:" "${opts[0]}" "${opts[@]}"
         elif [ "${#opts[@]}" -eq 2 ]; then
@@ -2266,9 +2286,10 @@ client_qr() {
     fi
 
     case "$mode" in
-        direct)   render_qr_file "${CLIENTS_DIR}/${cname}-direct.conf" "QR AmneziaWG Direct (${cname}):" ;;
-        relay)    render_qr_file "${CLIENTS_DIR}/${cname}-relay.conf" "QR FreeTurn Relay (${cname}):" ;;
-        freeturn) [ -f "${CLIENTS_DIR}/${cname}-freeturn.txt" ] && render_qr_text "$(<"${CLIENTS_DIR}/${cname}-freeturn.txt")" "QR FreeTurn App (${cname}):" ;;
+        freeturn_vpn) [ -f "${CLIENTS_DIR}/${cname}-freeturn-vpn.txt" ] && render_qr_text "$(<"${CLIENTS_DIR}/${cname}-freeturn-vpn.txt")" "QR FreeTurn App (со вшитым VPN - ${cname}):" ;;
+        freeturn)     [ -f "${CLIENTS_DIR}/${cname}-freeturn.txt" ] && render_qr_text "$(<"${CLIENTS_DIR}/${cname}-freeturn.txt")" "QR FreeTurn App (прокси - ${cname}):" ;;
+        direct)       render_qr_file "${CLIENTS_DIR}/${cname}-direct.conf" "QR AmneziaWG Direct (${cname}):" ;;
+        relay)        render_qr_file "${CLIENTS_DIR}/${cname}-relay.conf" "QR FreeTurn Relay (${cname}):" ;;
     esac
 }
 
@@ -2296,7 +2317,7 @@ client_remove() {
         rm -f "$tmp"
     fi
 
-    rm -f "${CLIENTS_DIR}/${cname}-direct.conf" "${CLIENTS_DIR}/${cname}-relay.conf" "${CLIENTS_DIR}/${cname}-freeturn.txt"
+    rm -f "${CLIENTS_DIR}/${cname}-direct.conf" "${CLIENTS_DIR}/${cname}-relay.conf" "${CLIENTS_DIR}/${cname}-freeturn.txt" "${CLIENTS_DIR}/${cname}-freeturn-vpn.txt"
     [ -f "$CLIENTS_META" ] && sed -i "/^${cname}|/d" "$CLIENTS_META"
     log_success "Клиент '${cname}' удалён."
 }
