@@ -3,8 +3,11 @@
 # `ft-awg-start sync` - применить правки conf к живому интерфейсу (docker exec с хоста).
 set -euo pipefail
 
-CONF="${AWG_CONF:-/etc/awg/awg0.conf}"
-IFACE="${AWG_IFACE:-awg0}"
+IFACE="${AWG_IFACE:-ftawg0}"
+CONF="${AWG_CONF:-/etc/awg/${IFACE}.conf}"
+if [ ! -f "$CONF" ] && [ -f "/etc/awg/awg0.conf" ]; then
+    CONF="/etc/awg/awg0.conf"
+fi
 
 # Значения ключа из [Interface] (до первого [Peer]), по одному на строку.
 _iface_vals() {

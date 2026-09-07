@@ -37,7 +37,7 @@ GUM_VERSION="0.17.0"
 
 # AmneziaWG и WireGuard
 AWG_DIR="${PREFIX}/awg"
-AWG_IFACE="awg0"
+AWG_IFACE="${FT_AWG_IFACE:-ftawg0}"
 AWG_CONF="${AWG_DIR}/${AWG_IFACE}.conf"
 AWG_NET="10.13.13"
 WG_DIR="${FT_WG_DIR:-/etc/wireguard}"
@@ -359,7 +359,7 @@ render_qr_file() {
         echo
         if [ "$HAS_GUM" = 1 ]; then gum style --foreground "$MD_PRIMARY" --bold "$title"
         else echo -e "${C_CYAN}${title}${C_NC}"; fi
-        qrencode -t ansiutf8 < "$file"
+        qrencode -t ansiutf8 -m 1 < "$file"
     else
         log_warn "qrencode не установлен - QR пропущен."
     fi
@@ -374,7 +374,7 @@ render_qr_text() {
         echo
         if [ "$HAS_GUM" = 1 ]; then gum style --foreground "$MD_PRIMARY" --bold "$title"
         else echo -e "${C_CYAN}${title}${C_NC}"; fi
-        qrencode -t ansiutf8 <<< "$text"
+        qrencode -t ansiutf8 -m 1 <<< "$text"
     else
         log_warn "qrencode не установлен - QR пропущен."
     fi
@@ -1207,6 +1207,8 @@ generate_freeturn_uri() {
     if [ -n "$obf" ] && [ "$obf" != "none" ]; then
         json="$json,\"obf\":\"$(esc "$obf")\",\"key\":\"$(esc "$key")\""
     fi
+    local n="${STREAMS:-12}" spc="${STREAMS_PER_CRED:-12}"
+    json="$json,\"n\":${n},\"spc\":${spc}"
     if [ -n "$cid" ]; then
         json="$json,\"cid\":\"$(esc "$cid")\""
     fi
@@ -1506,13 +1508,17 @@ apply_docker() {
             echo "    image: ${AWG_IMAGE}"
             echo "    container_name: ${AWG_CONTAINER}"
             echo "    network_mode: \"host\""
+            echo "    environment:"
+            echo "      - AWG_IFACE=${AWG_IFACE}"
+            echo "      - AWG_CONF=/etc/awg/${AWG_IFACE}.conf"
+            echo "      - AWG_LOG_LEVEL=verbose"
             echo "    cap_add:"
             echo "      - NET_ADMIN"
             echo "    devices:"
             echo "      - /dev/net/tun"
             echo "    restart: unless-stopped"
             echo "    volumes:"
-            echo "      - ${AWG_CONF}:/etc/awg/awg0.conf:ro"
+            echo "      - ${AWG_CONF}:/etc/awg/${AWG_IFACE}.conf:ro"
         fi
     } > "$COMPOSE_FILE"
     chmod 0600 "$COMPOSE_FILE"
@@ -2207,17 +2213,18 @@ EOF
     echo "${cname}|${client_ip}|${cid}|$(date '+%Y-%m-%d %H:%M')" >> "$CLIENTS_META"
     log_success "Клиент '${cname}' добавлен!"
 
-    if [ -f "$direct_conf" ]; then
-        render_qr_file "$direct_conf" "QR-код для AmneziaWG (Direct AWG 3.1):"
-        echo
-        log_info "Конфиг AmneziaWG: $direct_conf"
-        [ "$INSTALL_FREETURN" = "1" ] && log_info "Конфиг через релей FreeTurn: $relay_conf"
-    fi
-
     if [ -n "$ft_uri" ]; then
+        render_qr_text "$ft_uri" "QR-код для приложения FreeTurn (${cname}):"
         echo
         log_info "Ссылка FreeTurn: $ft_uri"
         [ -n "$cid" ] && log_info "Client ID: $cid"
+    fi
+
+    if [ -f "$direct_conf" ]; then
+        render_qr_file "$direct_conf" "QR-код для AmneziaWG Direct (${cname}):"
+        echo
+        log_info "Конфиг AmneziaWG Direct: $direct_conf"
+        [ "$INSTALL_FREETURN" = "1" ] && log_info "Конфиг через релей FreeTurn: $relay_conf"
     fi
 }
 
@@ -2236,7 +2243,7 @@ client_list() {
 }
 
 client_qr() {
-    local cname="${1:-}" mode="${2:-direct}"
+    local cname="${1:-}" mode="${2:-}"
     if [ -z "$cname" ]; then
         [ ! -s "$CLIENTS_META" ] && die "Нет клиентов."
         local names=()
@@ -2244,10 +2251,24 @@ client_qr() {
         [ "$HAS_GUM" = 1 ] && cname=$(gum choose --header "Клиент:" "${names[@]}" </dev/tty) || ui_input cname "Имя" "${names[0]}"
     fi
 
+    if [ -z "$mode" ]; then
+        local opts=()
+        [ -f "${CLIENTS_DIR}/${cname}-freeturn.txt" ] && opts+=(freeturn "Приложение FreeTurn (freeturn://)")
+        [ -f "${CLIENTS_DIR}/${cname}-direct.conf" ] && opts+=(direct "AmneziaWG Direct (AWG 3.1)")
+        [ -f "${CLIENTS_DIR}/${cname}-relay.conf" ] && opts+=(relay "FreeTurn Relay (WireGuard)")
+        if [ "${#opts[@]}" -gt 2 ]; then
+            ui_menu mode "Формат QR-кода:" "${opts[0]}" "${opts[@]}"
+        elif [ "${#opts[@]}" -eq 2 ]; then
+            mode="${opts[0]}"
+        else
+            mode="direct"
+        fi
+    fi
+
     case "$mode" in
         direct)   render_qr_file "${CLIENTS_DIR}/${cname}-direct.conf" "QR AmneziaWG Direct (${cname}):" ;;
         relay)    render_qr_file "${CLIENTS_DIR}/${cname}-relay.conf" "QR FreeTurn Relay (${cname}):" ;;
-        freeturn) [ -f "${CLIENTS_DIR}/${cname}-freeturn.txt" ] && render_qr_text "$(<"${CLIENTS_DIR}/${cname}-freeturn.txt")" "QR freeturn:// (${cname}):" ;;
+        freeturn) [ -f "${CLIENTS_DIR}/${cname}-freeturn.txt" ] && render_qr_text "$(<"${CLIENTS_DIR}/${cname}-freeturn.txt")" "QR FreeTurn App (${cname}):" ;;
     esac
 }
 
@@ -2372,19 +2393,28 @@ apply() {
 print_summary() {
     local ext_ip; ext_ip="$(get_public_ip)"
     echo
-    if [ "$HAS_GUM" = 1 ]; then
-        gum format <<EOF | gum style --border rounded --border-foreground "$MD_SUCCESS" --padding "1 2"
-# ✔ Установка успешно завершена!
+    local summary="# ✔ Установка успешно завершена!
 
-$([ "$INSTALL_FREETURN" = "1" ] && echo "- **Сервер FreeTurn:** \`${ext_ip}:${LISTEN_PORT}\` (\`${OBF_PROFILE}\`)")
-$([ "$INSTALL_AWG" = "1" ] && echo "- **AmneziaWG 3.1:** порт \`${BACKEND_PORT}\` $([ "$AWG_DIRECT_PORT" = "1" ] && echo "(прямой доступ открыт)"))
-
+"
+    if [ "$INSTALL_FREETURN" = "1" ]; then
+        summary+="- **Сервер FreeTurn:** \`${ext_ip}:${LISTEN_PORT}\` (\`${OBF_PROFILE}\`)
+"
+    fi
+    if [ "$INSTALL_AWG" = "1" ]; then
+        summary+="- **AmneziaWG 3.1:** порт \`${BACKEND_PORT}\`"
+        [ "$AWG_DIRECT_PORT" = "1" ] && summary+=" (прямой доступ открыт)"
+        summary+="
+"
+    fi
+    summary+="
 ---
 ### Управление клиентами
 \`sudo bash install.sh client add [name]\`  - добавить клиента
 \`sudo bash install.sh client list\`        - список клиентов
-\`sudo bash install.sh client qr [name]\`   - показать QR-код
-EOF
+\`sudo bash install.sh client qr [name]\`   - показать QR-код"
+
+    if [ "$HAS_GUM" = 1 ]; then
+        printf '%s\n' "$summary" | gum format | gum style --border rounded --border-foreground "$MD_SUCCESS" --padding "1 2"
     else
         echo "========================================================"
         echo "  Установка успешно завершена!"
@@ -2423,7 +2453,7 @@ menu_existing() {
         clients)
             while :; do
                 local c; ui_menu c "Клиенты:" "add" add "Добавить" list "Список" qr "QR-код" remove "Удалить" back "Назад"
-                case "$c" in add) client_add "" 0 ;; list) client_list ;; qr) client_qr "" "direct" ;; remove) client_remove "" ;; back) break ;; esac
+                case "$c" in add) client_add "" 0 ;; list) client_list ;; qr) client_qr "" ;; remove) client_remove "" ;; back) break ;; esac
             done; menu_existing ;;
         reconfigure) flow_reconfigure ;;
         update)      flow_update ;;
