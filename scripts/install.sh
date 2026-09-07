@@ -359,7 +359,7 @@ render_qr_file() {
         echo
         if [ "$HAS_GUM" = 1 ]; then gum style --foreground "$MD_PRIMARY" --bold "$title"
         else echo -e "${C_CYAN}${title}${C_NC}"; fi
-        qrencode -t ansiutf8 < "$file"
+        qrencode -t ansiutf8 -m 1 < "$file"
     else
         log_warn "qrencode не установлен - QR пропущен."
     fi
@@ -374,7 +374,7 @@ render_qr_text() {
         echo
         if [ "$HAS_GUM" = 1 ]; then gum style --foreground "$MD_PRIMARY" --bold "$title"
         else echo -e "${C_CYAN}${title}${C_NC}"; fi
-        qrencode -t ansiutf8 <<< "$text"
+        qrencode -t ansiutf8 -m 1 <<< "$text"
     else
         log_warn "qrencode не установлен - QR пропущен."
     fi
@@ -1207,6 +1207,8 @@ generate_freeturn_uri() {
     if [ -n "$obf" ] && [ "$obf" != "none" ]; then
         json="$json,\"obf\":\"$(esc "$obf")\",\"key\":\"$(esc "$key")\""
     fi
+    local n="${STREAMS:-12}" spc="${STREAMS_PER_CRED:-12}"
+    json="$json,\"n\":${n},\"spc\":${spc}"
     if [ -n "$cid" ]; then
         json="$json,\"cid\":\"$(esc "$cid")\""
     fi
@@ -2211,17 +2213,18 @@ EOF
     echo "${cname}|${client_ip}|${cid}|$(date '+%Y-%m-%d %H:%M')" >> "$CLIENTS_META"
     log_success "Клиент '${cname}' добавлен!"
 
-    if [ -f "$direct_conf" ]; then
-        render_qr_file "$direct_conf" "QR-код для AmneziaWG (Direct AWG 3.1):"
-        echo
-        log_info "Конфиг AmneziaWG: $direct_conf"
-        [ "$INSTALL_FREETURN" = "1" ] && log_info "Конфиг через релей FreeTurn: $relay_conf"
-    fi
-
     if [ -n "$ft_uri" ]; then
+        render_qr_text "$ft_uri" "QR-код для приложения FreeTurn (${cname}):"
         echo
         log_info "Ссылка FreeTurn: $ft_uri"
         [ -n "$cid" ] && log_info "Client ID: $cid"
+    fi
+
+    if [ -f "$direct_conf" ]; then
+        render_qr_file "$direct_conf" "QR-код для AmneziaWG Direct (${cname}):"
+        echo
+        log_info "Конфиг AmneziaWG Direct: $direct_conf"
+        [ "$INSTALL_FREETURN" = "1" ] && log_info "Конфиг через релей FreeTurn: $relay_conf"
     fi
 }
 
@@ -2240,7 +2243,7 @@ client_list() {
 }
 
 client_qr() {
-    local cname="${1:-}" mode="${2:-direct}"
+    local cname="${1:-}" mode="${2:-}"
     if [ -z "$cname" ]; then
         [ ! -s "$CLIENTS_META" ] && die "Нет клиентов."
         local names=()
@@ -2248,10 +2251,24 @@ client_qr() {
         [ "$HAS_GUM" = 1 ] && cname=$(gum choose --header "Клиент:" "${names[@]}" </dev/tty) || ui_input cname "Имя" "${names[0]}"
     fi
 
+    if [ -z "$mode" ]; then
+        local opts=()
+        [ -f "${CLIENTS_DIR}/${cname}-freeturn.txt" ] && opts+=(freeturn "Приложение FreeTurn (freeturn://)")
+        [ -f "${CLIENTS_DIR}/${cname}-direct.conf" ] && opts+=(direct "AmneziaWG Direct (AWG 3.1)")
+        [ -f "${CLIENTS_DIR}/${cname}-relay.conf" ] && opts+=(relay "FreeTurn Relay (WireGuard)")
+        if [ "${#opts[@]}" -gt 2 ]; then
+            ui_menu mode "Формат QR-кода:" "${opts[0]}" "${opts[@]}"
+        elif [ "${#opts[@]}" -eq 2 ]; then
+            mode="${opts[0]}"
+        else
+            mode="direct"
+        fi
+    fi
+
     case "$mode" in
         direct)   render_qr_file "${CLIENTS_DIR}/${cname}-direct.conf" "QR AmneziaWG Direct (${cname}):" ;;
         relay)    render_qr_file "${CLIENTS_DIR}/${cname}-relay.conf" "QR FreeTurn Relay (${cname}):" ;;
-        freeturn) [ -f "${CLIENTS_DIR}/${cname}-freeturn.txt" ] && render_qr_text "$(<"${CLIENTS_DIR}/${cname}-freeturn.txt")" "QR freeturn:// (${cname}):" ;;
+        freeturn) [ -f "${CLIENTS_DIR}/${cname}-freeturn.txt" ] && render_qr_text "$(<"${CLIENTS_DIR}/${cname}-freeturn.txt")" "QR FreeTurn App (${cname}):" ;;
     esac
 }
 
@@ -2436,7 +2453,7 @@ menu_existing() {
         clients)
             while :; do
                 local c; ui_menu c "Клиенты:" "add" add "Добавить" list "Список" qr "QR-код" remove "Удалить" back "Назад"
-                case "$c" in add) client_add "" 0 ;; list) client_list ;; qr) client_qr "" "direct" ;; remove) client_remove "" ;; back) break ;; esac
+                case "$c" in add) client_add "" 0 ;; list) client_list ;; qr) client_qr "" ;; remove) client_remove "" ;; back) break ;; esac
             done; menu_existing ;;
         reconfigure) flow_reconfigure ;;
         update)      flow_update ;;
