@@ -88,13 +88,16 @@ openssl rand -hex 32
        image: ghcr.io/samosvalishe/freeturn-awg:latest
        container_name: freeturn-awg
        network_mode: "host"
+       environment:
+         - AWG_IFACE=ftawg0
+         - AWG_LOG_LEVEL=verbose
        cap_add:
          - NET_ADMIN
        devices:
          - /dev/net/tun
        restart: unless-stopped
        volumes:
-         - /opt/free-turn-proxy/awg/awg0.conf:/etc/awg/awg0.conf:ro
+         - /opt/free-turn-proxy/awg/ftawg0.conf:/etc/awg/ftawg0.conf:ro
    ```
 4. Включите IP forwarding на хосте:
    ```bash
@@ -170,12 +173,12 @@ DisableCookies = on
 ```
 
 - **Прямой туннель (Direct AWG):** откройте порт `51820/udp` в файрволе, чтобы клиенты AmneziaWG могли подключаться напрямую к серверу без задержек релея.
-- **Горячая синхронизация пиров:** добавьте `[Peer]` в `awg0.conf` и выполните `docker exec freeturn-awg ft-awg-start sync`. Существующие соединения не прерываются!
+- **Горячая синхронизация пиров:** добавьте `[Peer]` в `ftawg0.conf` и выполните `docker exec freeturn-awg ft-awg-start sync`. Существующие соединения не прерываются!
 
 | Переменная | По умолчанию | Описание |
 | --- | --- | --- |
-| `AWG_CONF` | `/etc/awg/awg0.conf` | Путь к конфигу в контейнере |
-| `AWG_IFACE` | `awg0` | Имя интерфейса |
+| `AWG_CONF` | `/etc/awg/ftawg0.conf` | Путь к конфигу в контейнере |
+| `AWG_IFACE` | `ftawg0` | Имя интерфейса |
 | `AWG_LOG_LEVEL` | `error` | Логи демона: `error` \| `verbose` \| `silent` |
 
 NAT настраивается только для IPv4 (контейнер использует network_mode: host и добавляет правила iptables в стек хоста).

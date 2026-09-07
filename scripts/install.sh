@@ -37,7 +37,7 @@ GUM_VERSION="0.17.0"
 
 # AmneziaWG и WireGuard
 AWG_DIR="${PREFIX}/awg"
-AWG_IFACE="awg0"
+AWG_IFACE="${FT_AWG_IFACE:-ftawg0}"
 AWG_CONF="${AWG_DIR}/${AWG_IFACE}.conf"
 AWG_NET="10.13.13"
 WG_DIR="${FT_WG_DIR:-/etc/wireguard}"
@@ -1506,13 +1506,17 @@ apply_docker() {
             echo "    image: ${AWG_IMAGE}"
             echo "    container_name: ${AWG_CONTAINER}"
             echo "    network_mode: \"host\""
+            echo "    environment:"
+            echo "      - AWG_IFACE=${AWG_IFACE}"
+            echo "      - AWG_CONF=/etc/awg/${AWG_IFACE}.conf"
+            echo "      - AWG_LOG_LEVEL=verbose"
             echo "    cap_add:"
             echo "      - NET_ADMIN"
             echo "    devices:"
             echo "      - /dev/net/tun"
             echo "    restart: unless-stopped"
             echo "    volumes:"
-            echo "      - ${AWG_CONF}:/etc/awg/awg0.conf:ro"
+            echo "      - ${AWG_CONF}:/etc/awg/${AWG_IFACE}.conf:ro"
         fi
     } > "$COMPOSE_FILE"
     chmod 0600 "$COMPOSE_FILE"
@@ -2372,19 +2376,28 @@ apply() {
 print_summary() {
     local ext_ip; ext_ip="$(get_public_ip)"
     echo
-    if [ "$HAS_GUM" = 1 ]; then
-        gum format <<EOF | gum style --border rounded --border-foreground "$MD_SUCCESS" --padding "1 2"
-# ✔ Установка успешно завершена!
+    local summary="# ✔ Установка успешно завершена!
 
-$([ "$INSTALL_FREETURN" = "1" ] && echo "- **Сервер FreeTurn:** \`${ext_ip}:${LISTEN_PORT}\` (\`${OBF_PROFILE}\`)")
-$([ "$INSTALL_AWG" = "1" ] && echo "- **AmneziaWG 3.1:** порт \`${BACKEND_PORT}\` $([ "$AWG_DIRECT_PORT" = "1" ] && echo "(прямой доступ открыт)"))
-
+"
+    if [ "$INSTALL_FREETURN" = "1" ]; then
+        summary+="- **Сервер FreeTurn:** \`${ext_ip}:${LISTEN_PORT}\` (\`${OBF_PROFILE}\`)
+"
+    fi
+    if [ "$INSTALL_AWG" = "1" ]; then
+        summary+="- **AmneziaWG 3.1:** порт \`${BACKEND_PORT}\`"
+        [ "$AWG_DIRECT_PORT" = "1" ] && summary+=" (прямой доступ открыт)"
+        summary+="
+"
+    fi
+    summary+="
 ---
 ### Управление клиентами
 \`sudo bash install.sh client add [name]\`  - добавить клиента
 \`sudo bash install.sh client list\`        - список клиентов
-\`sudo bash install.sh client qr [name]\`   - показать QR-код
-EOF
+\`sudo bash install.sh client qr [name]\`   - показать QR-код"
+
+    if [ "$HAS_GUM" = 1 ]; then
+        printf '%s\n' "$summary" | gum format | gum style --border rounded --border-foreground "$MD_SUCCESS" --padding "1 2"
     else
         echo "========================================================"
         echo "  Установка успешно завершена!"
