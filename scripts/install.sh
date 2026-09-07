@@ -453,6 +453,7 @@ pkg_remove() {
         *)      return 1 ;;
     esac
 }
+export -f pkg_mgr _apt_wait_lock pkg_install pkg_remove 2>/dev/null || true
 
 ensure_base_deps() {
     local missing=() b
@@ -504,19 +505,108 @@ ensure_gum() {
     log_warn "gum недоступен - классический текстовый режим."
 }
 
-ensure_docker() {
-    command -v docker >/dev/null 2>&1 && return 0
-    if [ "$NONINTERACTIVE" != 1 ] && [ "$_IS_RPC" != 1 ]; then
-        if ! ui_yesno "Docker не найден. Установить автоматически?" "Y"; then
-            die "Для выбранного метода требуется Docker."
+compose_cmd() {
+    if docker compose version >/dev/null 2>&1; then
+        docker compose "$@"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        docker-compose "$@"
+    else
+        die "Docker Compose не найден."
+    fi
+}
+export -f compose_cmd 2>/dev/null || true
+
+_install_compose_step() {
+    local mgr; mgr=$(pkg_mgr 2>/dev/null || true)
+    if [ -n "$mgr" ]; then
+        case "$mgr" in
+            apt-get)
+                pkg_install docker-compose-v2 || pkg_install docker-compose-plugin || pkg_install docker-compose || true ;;
+            dnf|yum)
+                pkg_install docker-compose-plugin || pkg_install docker-compose || true ;;
+            apk)
+                pkg_install docker-cli-compose || pkg_install docker-compose || true ;;
+            *)
+                pkg_install docker-compose || true ;;
+        esac
+    fi
+
+    if command -v docker-compose >/dev/null 2>&1 && ! docker compose version >/dev/null 2>&1; then
+        mkdir -p /usr/local/lib/docker/cli-plugins
+        ln -sf "$(command -v docker-compose)" /usr/local/lib/docker/cli-plugins/docker-compose 2>/dev/null || true
+    fi
+
+    if docker compose version >/dev/null 2>&1; then
+        return 0
+    fi
+
+    local m; m=$(uname -m 2>/dev/null || echo "x86_64")
+    case "$m" in
+        x86_64|amd64)   m="x86_64" ;;
+        aarch64|arm64)  m="aarch64" ;;
+        armv7*)         m="armv7" ;;
+        armv6*)         m="armv6" ;;
+        riscv64)        m="riscv64" ;;
+        s390x)          m="s390x" ;;
+        ppc64le)        m="ppc64le" ;;
+        *)              return 1 ;;
+    esac
+
+    local plugin_dir="/usr/local/lib/docker/cli-plugins"
+    mkdir -p "$plugin_dir" /usr/local/bin
+    if curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$m" \
+        -o "$plugin_dir/docker-compose" 2>/dev/null; then
+        chmod +x "$plugin_dir/docker-compose"
+        ln -sf "$plugin_dir/docker-compose" /usr/local/bin/docker-compose 2>/dev/null || true
+        return 0
+    fi
+    return 1
+}
+export -f _install_compose_step 2>/dev/null || true
+
+ensure_compose() {
+    if docker compose version >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v docker-compose >/dev/null 2>&1; then
+        mkdir -p /usr/local/lib/docker/cli-plugins
+        ln -sf "$(command -v docker-compose)" /usr/local/lib/docker/cli-plugins/docker-compose 2>/dev/null || true
+        if docker compose version >/dev/null 2>&1; then
+            return 0
         fi
     fi
+
     if [ "$_IS_RPC" = 1 ]; then
-        curl -fsSL https://get.docker.com | sh >/dev/null 2>&1 || fail docker_install_failed "docker install failed"
+        _install_compose_step >/dev/null 2>&1 || fail compose_install_failed "docker compose install failed"
     else
-        ui_spin "Установка Docker" sh -c 'curl -fsSL https://get.docker.com | sh' || die "Установка Docker не удалась."
+        ui_spin "Установка Docker Compose" _install_compose_step || die "Установка Docker Compose не удалась."
     fi
-    command -v docker >/dev/null 2>&1 || die "Docker не появился в PATH."
+
+    if ! docker compose version >/dev/null 2>&1 && ! command -v docker-compose >/dev/null 2>&1; then
+        die "Docker Compose не появился в системе."
+    fi
+}
+
+ensure_docker() {
+    if ! command -v docker >/dev/null 2>&1; then
+        if [ "$NONINTERACTIVE" != 1 ] && [ "$_IS_RPC" != 1 ]; then
+            if ! ui_yesno "Docker не найден. Установить автоматически?" "Y"; then
+                die "Для выбранного метода требуется Docker."
+            fi
+        fi
+        if [ "$_IS_RPC" = 1 ]; then
+            curl -fsSL https://get.docker.com | sh >/dev/null 2>&1 || fail docker_install_failed "docker install failed"
+        else
+            ui_spin "Установка Docker" sh -c 'curl -fsSL https://get.docker.com | sh' || die "Установка Docker не удалась."
+        fi
+        command -v docker >/dev/null 2>&1 || die "Docker не появился в PATH."
+    fi
+
+    if ! docker info >/dev/null 2>&1; then
+        systemctl start docker >/dev/null 2>&1 || service docker start >/dev/null 2>&1 || true
+    fi
+
+    ensure_compose
 }
 
 _mips_is_le() {
@@ -1281,7 +1371,7 @@ _write_env_file() {
 
 _stop_docker() {
     if [ -f "$COMPOSE_FILE" ] && command -v docker >/dev/null 2>&1; then
-        ( cd "$APP_DIR" && docker compose stop ) >/dev/null 2>&1 || true
+        ( cd "$APP_DIR" && compose_cmd stop ) >/dev/null 2>&1 || true
     fi
     docker stop "$CONTAINER" "$AWG_CONTAINER" >/dev/null 2>&1 || true
 }
@@ -1386,11 +1476,11 @@ apply_docker() {
     chmod 0600 "$COMPOSE_FILE"
 
     if [ "$_IS_RPC" = 1 ]; then
-        ( cd "$APP_DIR" && docker compose pull >/dev/null 2>&1 && docker compose up -d >/dev/null 2>&1 ) \
+        ( cd "$APP_DIR" && compose_cmd pull >/dev/null 2>&1 && compose_cmd up -d >/dev/null 2>&1 ) \
             || fail compose_up_failed "docker compose up failed"
     else
-        ( cd "$APP_DIR" && ui_spin "Загрузка Docker-образов" docker compose pull ) || die "docker compose pull не удался."
-        ( cd "$APP_DIR" && ui_spin "Запуск служб" docker compose up -d ) || die "docker compose up не удался."
+        ( cd "$APP_DIR" && ui_spin "Загрузка Docker-образов" compose_cmd pull ) || die "docker compose pull не удался."
+        ( cd "$APP_DIR" && ui_spin "Запуск служб" compose_cmd up -d ) || die "docker compose up не удался."
     fi
     healthcheck_docker
 }
@@ -1910,7 +2000,7 @@ do_uninstall() {
             log_info "Полное удаление..."
             rt_stop
             if [ -f "$COMPOSE_FILE" ] && command -v docker >/dev/null 2>&1; then
-                ( cd "$APP_DIR" && docker compose down -v ) >/dev/null 2>&1 || true
+                ( cd "$APP_DIR" && compose_cmd down -v ) >/dev/null 2>&1 || true
             fi
             if has_systemd; then
                 systemctl disable --now "$SERVICE" >/dev/null 2>&1 || true
