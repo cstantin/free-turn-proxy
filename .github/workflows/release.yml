@@ -136,12 +136,13 @@ jobs:
     name: Telegram announce
     runs-on: ubuntu-latest
     needs: goreleaser
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
     steps:
       - name: Send release message
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        if: ${{ env.BOT_TOKEN != '' && env.CHAT_ID != '' }}
         run: |
           BODY=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body -q .body | head -c 3000)
           URL=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json url -q .url)
